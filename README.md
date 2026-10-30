@@ -34,6 +34,13 @@ Agent phát triển tiếp cần đọc **system_map_daytiengviet.md** và **AGE
 
 ## Mở app
 
+**Mở ẩn từ Start:** chạy **TAO_BIEU_TUONG_START.cmd** một lần để tạo biểu tượng **Vietnamese with Vinh** trong danh sách ứng dụng Start và tệp **Vietnamese with Vinh.lnk** ngay trong thư mục app. Bản cài hiện tại đã tạo sẵn cả hai.
+
+Bấm Start, tìm **Vietnamese with Vinh**, nhấp phải → **Pin to Start / Ghim vào Bắt đầu**. Hoặc nhấp phải tệp shortcut trong thư mục app rồi ghim. Đây là [cách ghim của Windows](https://support.microsoft.com/en-us/windows/experience/personalization/customize-the-windows-start-menu).
+
+Biểu tượng mở trình duyệt và tự chạy app ẩn, không hiện cửa sổ lệnh. Nếu app đã chạy, chỉ mở lại trang đang phục vụ; bấm liên tiếp không tạo nhiều máy chủ. Đóng tab trình duyệt vẫn để tác vụ đang xử lý tiếp tục. Lỗi khởi động được ghi vào `data/logs/launcher.log`, có thông báo nếu không mở được. Sau khi chuyển thư mục app hoặc đổi môi trường Python, chạy lại tệp tạo biểu tượng và ghim lại nếu cần. Shortcut không tự mở app khi đăng nhập Windows.
+
+
 Nhấp đúp **MO_VIETCUT.cmd**, giữ cửa sổ chạy app mở. Trình duyệt tự mở tại địa chỉ ghi trong `.env` (máy hiện tại: **http://127.0.0.1:8876**).
 
 Nếu cần cài lại thư viện hoặc chuyển sang máy mới, cài Python 3.11+, Node.js 20.19+/22.12+ và FFmpeg có bộ lọc subtitles, sau đó chạy **CAI_DAT.cmd**. Bản đã biên dịch nằm trong `dist/`.

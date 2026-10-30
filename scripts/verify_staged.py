@@ -15,7 +15,7 @@ def verify():
     issues=[]
     for path in entries:
         parts=Path(path).parts
-        if (Path(path).name.startswith('.env') and Path(path).name!='.env.example') or any(part in {'data','OUTPUT','node_modules','.venv','__pycache__','dist'} for part in parts) or Path(path).suffix.lower() in {'.mp4','.mov','.mkv','.m4v','.webm','.wav','.flac','.mp3','.zip','.sqlite','.torchscript','.pth','.onnx','.npz'}:
+        if (Path(path).name.startswith('.env') and Path(path).name!='.env.example') or any(part in {'data','OUTPUT','node_modules','.venv','__pycache__','dist'} for part in parts) or Path(path).suffix.lower() in {'.mp4','.mov','.mkv','.m4v','.webm','.wav','.flac','.mp3','.zip','.sqlite','.torchscript','.pth','.onnx','.npz','.lnk'}:
             issues.append(path+': private/generated data');continue
         content=git('show',':'+path)
         if any(key in content for key in keys):issues.append(path+': configured credential found')

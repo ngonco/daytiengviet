@@ -24,3 +24,4 @@ OUTPUT/
 *.pth
 *.onnx
 *.npz
+*.lnk

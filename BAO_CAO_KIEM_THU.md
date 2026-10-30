@@ -1,5 +1,18 @@
 # Báo cáo kiểm thử — Vietnamese with Vinh
 
+## Biểu tượng Vietnamese with Vinh trong Start menu
+
+Đã tạo shortcut **Vietnamese with Vinh.lnk** tại thư mục gốc ứng dụng và thư mục Programs của Start menu cá nhân. Đọc lại bằng Windows COM để xác nhận tệp đích pythonw.exe, đối số có dấu ngoặc cho đường dẫn chứa khoảng trắng, thư mục làm việc và biểu tượng riêng đều đúng. Tệp cài lại là **TAO_BIEU_TUONG_START.cmd**; shortcut chứa đường dẫn tại máy nên được loại khỏi Git.
+
+Đã mở thật qua shortcut: app sẵn sàng sau **5,31 giây**, trả health VietCut 1.3.0. Tiến trình phục vụ cổng là **pythonw**, chỉ có một phiên launcher và không có cửa sổ chính. Mở ẩn lần hai từ thư mục khác thoát thành công với mã 0, dùng lại máy chủ đang chạy. Log khởi động nằm tại `data/logs/launcher.log`; luồng xuất/lỗi được gắn trước khi nạp Uvicorn để tương thích pythonw.
+
+**57 kiểm thử tự động đều qua; npm run build thành công.** Sáu kiểm thử mới xác minh nhận diện đúng app, dùng lại máy chủ, cổng sai/build thiếu, chờ khi bấm liên tiếp, khóa/release và chỉ phục vụ loopback. Không đăng ký chạy khi đăng nhập, không chỉnh registry ghim hoặc đổi execution policy. Người dùng chọn **Pin to Start** qua menu chuẩn của Windows; đây không phải trạng thái đã tự ghim vào vùng Pinned.
+
+Chứng cứ riêng tại `OUTPUT/launcher/verification.json` và `process-verification.json`. Mã nguồn/công cụ tạo biểu tượng được đồng bộ Git; tệp .lnk cài tại máy và log nằm ngoài Git.
+
+---
+
+
 ## Khung không blur, chỉnh cắt ảnh và bộ 10 ảnh — v1.3
 
 **51 kiểm thử tự động đều qua; `npm run build` thành công.** Các kiểm thử có sẵn về STT/AI, khóa bài, cắt/khôi phục, phụ đề, xóa phông và legacy tiếp tục qua.
