@@ -1,3 +1,4 @@
+from .seo import metadata_args
 import hashlib
 import json
 import math
@@ -55,7 +56,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     used={l.get('asset_id') for l in plan['lessons'] if l.get('asset_id')}
     hashes={key:hashlib.sha256((folder/'assets'/asset['file']).read_bytes()).hexdigest() for key,asset in project.get('assets',{}).items() if key in used}
     theme=signature();focus=speaker_focus(project,w,h)
-    identity={'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
+    identity={'seo_title':project.get('title'),'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
     code=digest(identity);render_dir=folder/'renders'/code;render_dir.mkdir(parents=True,exist_ok=True)
     result=render_dir/('preview.mp4' if preview else 'final.mp4');manifest=render_dir/'manifest.json'
     if result.exists() and manifest.exists():return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
@@ -140,7 +141,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
         args+=['-i',sfx];af.append(f'[{n}:a]volume=0.35[fx]');mix.append('fx')
     af.append(''.join('['+label+']' for label in mix)+f'amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=0.89:level=false[aout]')
     temp=render_dir/'assembling.mp4'
-    ffmpeg([*args,'-filter_complex',';'.join(af),'-map','0:v:0','-map','[aout]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',duration,'-movflags','+faststart',temp],context)
+    ffmpeg([*args,'-filter_complex',';'.join(af),'-map','0:v:0','-map','[aout]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',duration,*metadata_args(project),'-movflags','+faststart',temp],context)
     temp.replace(result);write_srt(project,plan,render_dir)
     atomic_json(render_dir/'edit-plan.json',{'plan':plan,'options':project['options'],'source_file':project['source_file'],'time_map':spans})
     atomic_json(render_dir/'credits.json',[{'photographer':a.get('photographer','Bạn cung cấp'),'url':a.get('url',''),'photographer_url':a.get('photographer_url','')} for key,a in project.get('assets',{}).items() if key in used])

@@ -1,3 +1,4 @@
+from .seo import metadata_args
 import hashlib
 import json
 import math
@@ -11,7 +12,7 @@ from .media import ffmpeg, font_path
 from .store import atomic_json
 from .timeline import keep_spans, map_interval
 
-RENDER_VERSION = 7
+RENDER_VERSION = 8
 
 def dimensions(project, preview=False):
     ratio = project['options']['ratio']
@@ -228,7 +229,7 @@ def render(project, plan, transcript, context, preview=True):
         raise ValueError('Không có đoạn giữ lại để dựng')
     # Every render has an immutable identity. A failed new render never overwrites a good one.
     matting_code=project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None
-    identity={'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
+    identity={'seo_title':project.get('title'),'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
     digest=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:18]
     render_dir=folder/'renders'/digest
     render_dir.mkdir(parents=True,exist_ok=True)
@@ -328,7 +329,7 @@ def render(project, plan, transcript, context, preview=True):
         mix.append('fx')
     audio_filters.append(''.join('['+label+']' for label in mix)+f'amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=0.89:level=false[aout]')
     temp=render_dir/'assembling.mp4'
-    ffmpeg([*args,'-filter_complex',';'.join(audio_filters),'-map','0:v:0','-map','[aout]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',duration,'-movflags','+faststart',temp],context)
+    ffmpeg([*args,'-filter_complex',';'.join(audio_filters),'-map','0:v:0','-map','[aout]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',duration,*metadata_args(project),'-movflags','+faststart',temp],context)
     temp.replace(result)
     write_srt(project,plan,render_dir)
     atomic_json(render_dir/'edit-plan.json',{'plan':plan,'options':project['options'],'source_file':project['source_file'],'time_map':spans})

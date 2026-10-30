@@ -1,3 +1,4 @@
+from .seo import basename
 import asyncio
 import json
 import shutil
@@ -516,12 +517,12 @@ def download(project_id:str,kind:Literal['video','vi','en','project','credits'])
                         archive.write(p,p.relative_to(folder))
             if project.get('music_file'):
                 archive.write(folder/project['music_file'],project['music_file'])
-        return FileResponse(target,filename='VietCut-project.zip')
+        return FileResponse(target,filename=basename(project)+'-project.zip')
     relative=result['file'] if kind=='video' else result['folder']+'/'+('subtitles.'+kind+'.srt' if kind in ['vi','en'] else 'credits.json')
     path=folder/relative
     if not path.exists():
         raise HTTPException(404,'Không tìm thấy bản xuất.')
-    return FileResponse(path,filename=('VietCut-'+project['id']+'.mp4') if kind=='video' else path.name)
+    return FileResponse(path,filename=basename(project)+('.mp4' if kind=='video' else '.'+kind+'.srt' if kind in ['vi','en'] else '-credits.json'))
 
 @app.post('/api/projects/import')
 def import_project(file:UploadFile=File(...)):

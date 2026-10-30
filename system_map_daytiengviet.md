@@ -161,3 +161,8 @@ Only code, blank configuration, documentation, licensed template/font assets and
 - Old visual appears after changing theme/asset: inspect template/file content hashes and render-version invalidation.
 - API error: inspect job's sanitized error; check .env using the settings UI. Never paste credentials into logs or reports.
 - Current limits: source up to 60 minutes; full-hour orchestration has simulated coverage, not a measured one-hour Full HD performance guarantee.
+
+## SEO downloads
+
+- backend/seo.py supplies safe ASCII download names with vietnamese-learn-bai-hoc and project lesson title for MP4, language-specific SRT and ZIP. Newly rendered MP4s embed lesson title, description, keywords in comment, author, education genre and Vietnamese language. Renderer v8 invalidates old output caches; title participates in output identity. Existing saved exports remain intact. Download controls appear above the editor grid.
+- Validation: npm run build and offline unittest suite (see delivery result).
