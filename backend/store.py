@@ -9,6 +9,9 @@ from .config import data_root
 
 LOCK = threading.RLock()
 
+class TrashedProject(RuntimeError):
+    pass
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -38,16 +41,21 @@ def init():
 def folder(project_id):
     if not project_id.isalnum() or len(project_id) != 16:
         raise ValueError('Mã dự án không hợp lệ')
+    try:read(project_id)
+    except KeyError:pass
     path = data_root() / 'projects' / project_id
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def read(project_id):
+def read(project_id,include_trashed=False):
     with connect() as conn:
         row = conn.execute('SELECT data FROM projects WHERE id=?', (project_id,)).fetchone()
     if not row:
         raise KeyError('Không tìm thấy dự án')
-    return json.loads(row['data'])
+    project=json.loads(row['data'])
+    if not include_trashed and project.get('_retention',{}).get('state','active')!='active':
+        raise TrashedProject('Dự án đã được chuyển vào Thùng rác. Khôi phục để tiếp tục chỉnh sửa.')
+    return project
 
 def save(project):
     project['updated_at'] = now()
@@ -61,10 +69,11 @@ def update(project_id, **changes):
         save(project)
         return project
 
-def listing():
+def listing(include_trashed=False):
     with connect() as conn:
         rows = conn.execute('SELECT data FROM projects ORDER BY updated DESC').fetchall()
-    return [json.loads(row['data']) for row in rows]
+    projects=[json.loads(row['data']) for row in rows]
+    return projects if include_trashed else [p for p in projects if p.get('_retention',{}).get('state','active')=='active']
 
 def jobs(project_id=None):
     with connect() as conn:
@@ -85,6 +94,7 @@ def job_update(job_id, **changes):
 
 def job_create(project_id, kind, request=None):
     with LOCK, connect() as conn:
+        read(project_id)
         active = conn.execute("SELECT id FROM jobs WHERE project_id=? AND status IN ('queued','running','cancelling')", (project_id,)).fetchone()
         if active:
             raise ValueError('Dự án đang có tác vụ; hãy đợi hoặc hủy trước.')

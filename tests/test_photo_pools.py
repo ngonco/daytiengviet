@@ -124,7 +124,7 @@ class PhotoPoolTests(unittest.TestCase):
             ffmpeg(['-f','lavfi','-i','color=c=blue:s=64x64:r=30','-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t',2,'-c:v','libx264','-c:a','aac',folder/'source.mp4'])
             plan=validate_plan({'schema_version':2,'lessons':[lesson(asset_id='pexels-0',photo_candidates=list(assets))]},2)
             options=Options(layout_mode='lesson').model_dump()
-            store.save({'id':pid,'title':'Portable pool','metadata':{'duration':2,'width':64,'height':64},'source_file':'source.mp4','options':options,'revision':1,'plan':plan,'assets':assets,'preview':{'file':'placeholder.mp4'}})
+            store.save({'id':pid,'title':'Portable pool','created_at':'2000-01-01T00:00:00Z','metadata':{'duration':2,'width':64,'height':64},'source_file':'source.mp4','options':options,'revision':1,'plan':plan,'assets':assets,'preview':{'file':'placeholder.mp4'}})
             client=TestClient(app);plan=copy.deepcopy(plan);l=plan['lessons'][0]
             l.update(asset_id='pexels-3',locked=True,photo_crops={'9:16':{'x':.2,'y':.8,'zoom':2},'16:9':{'x':.7,'y':.3,'zoom':1.2}})
             with patch('backend.providers.search_photos',side_effect=AssertionError('Offline selection')),patch('backend.providers.chat',side_effect=AssertionError('Offline selection')):
@@ -133,6 +133,8 @@ class PhotoPoolTests(unittest.TestCase):
                 archive=client.get(f'/api/projects/{pid}/download/project');self.assertEqual(archive.status_code,200)
                 imported=client.post('/api/projects/import',files={'file':('p.zip',archive.content,'application/zip')});self.assertEqual(imported.status_code,200,imported.text)
             self.assertEqual(imported.json()['plan']['lessons'][0],l)
+            self.assertEqual(imported.json()['origin_created_at'],'2000-01-01T00:00:00Z')
+            self.assertNotEqual(imported.json()['created_at'],'2000-01-01T00:00:00Z')
             with zipfile.ZipFile(io.BytesIO(archive.content)) as zip:
                 self.assertEqual(len([n for n in zip.namelist() if n.startswith('assets/')]),10)
                 self.assertIn('versions/v00001.json',zip.namelist())
@@ -149,7 +151,7 @@ class PhotoPoolTests(unittest.TestCase):
             with patch('backend.providers.search_photos',side_effect=AssertionError('Reading must not fetch photos')):
                 self.assertEqual(client.get(f'/api/projects/{pid}').status_code,200)
                 geometry=client.get(f'/api/projects/{pid}/photo-layout',params={'asset_id':'p','ratio':'9:16','zoom':2}).json()
-            self.assertEqual(geometry,dict(layout(320,800,988,580,2),crop_key='9:16'))
+            self.assertEqual(geometry,dict(layout(320,800,988,566,2),crop_key='9:16'))
             self.assertEqual(client.post(f'/api/projects/{pid}/lessons/l/photo-candidates',json={'revision':0}).status_code,422)
             self.assertEqual(client.post(f'/api/projects/{pid}/lessons/l/photo-candidates',json={'revision':2}).status_code,409)
             job=client.post(f'/api/projects/{pid}/lessons/l/photo-candidates',json={'revision':1,'refresh':True}).json()

@@ -16,6 +16,37 @@ from scripts.matting_runner import Corrections,Pipes,read_exact,infer_group
 
 
 class MattingTests(unittest.TestCase):
+    def test_legacy_layer_pairs_reused_for_new_palette_without_model(self):
+        from backend.media import ffmpeg
+        from backend import matting
+        with TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            ffmpeg(['-f','lavfi','-i','color=c=red:s=64x64:r=30','-f','lavfi','-i','anullsrc=r=48000:cl=stereo','-t','0.5','-c:v','libx264','-c:a','aac',folder/'source.mp4'])
+            p={'source_file':'source.mp4','metadata':{'width':64,'height':64,'duration':.5},'options':{'background_removal':{'enabled':True}}}
+            key,identity=cache_identity(p,folder);legacy='b'*24;layer=folder/'matting'/legacy;part=layer/'00000';part.mkdir(parents=True)
+            ffmpeg(['-f','lavfi','-i','color=c=red:s=64x64:r=30','-t','0.5','-c:v','libx264','-pix_fmt','yuv444p',part/'foreground.mp4'])
+            ffmpeg(['-f','lavfi','-i','color=c=white:s=64x64:r=30','-t','0.5','-c:v','ffv1','-pix_fmt','gray',part/'alpha.mkv'])
+            (part/'complete.json').write_text(json.dumps({'frames':15}))
+            stats={'processing_seconds_this_run':0,'fps_this_run':0,'model_load_seconds':0,'peak_gpu_mb':0,'warnings':[]}
+            (layer/'manifest.json').write_text(json.dumps({'code':legacy,'identity':{**identity,'paper':'#fbf5e9'},'stats':stats}))
+            before=(part/'alpha.mkv').stat().st_mtime_ns
+            class C:
+                kind='preview'
+                def __init__(self):self.folder=folder
+                def check(self):pass
+                def progress(self,*args):pass
+            with patch('backend.matting.runtime_status',side_effect=AssertionError('Must not initialize GPU for palette change')):
+                first=ensure_matting(p,C());self.assertTrue(first['reused_layers']);self.assertEqual(first['layer_code'],legacy)
+                self.assertTrue((folder/first['file']).is_file())
+                second_theme={'paper':'#FFFFFF'}
+                real_read=Path.read_text
+                def themed(path,*args,**kwargs):
+                    if path==matting.ROOT/'assets/frame_brand.json':return json.dumps(second_theme)
+                    return real_read(path,*args,**kwargs)
+                with patch('pathlib.Path.read_text',themed):
+                    second=ensure_matting(p,C());self.assertNotEqual(first['code'],second['code']);self.assertEqual(second['layer_code'],legacy)
+            self.assertEqual((part/'alpha.mkv').stat().st_mtime_ns,before)
+
     def test_oom_retries_one_frame_without_resetting_recurrence(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

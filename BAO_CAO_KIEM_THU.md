@@ -1,5 +1,34 @@
 # Báo cáo kiểm thử — Vietnamese with Vinh
 
+## Khung pastel, xem trực tiếp và Thùng rác — v1.4, 30/10/2026
+
+**76 kiểm thử Python và 3 kiểm thử điều phối xem trước đều qua; `npm run build` thành công.** Không gọi Groq/Vilao/Pexels trong đợt kiểm tra này.
+
+- Khung dọc: ảnh trên, bài học giữa, người nói dưới cao khoảng 30%; phụ đề Việt–Anh đặt ở đáy ảnh trên. Ngang giữ bố cục người nói trái. Hai khung dùng be/trắng/xanh pastel/navy theo `assets/frame_brand.json`, viền mảnh, không blur. Đã kiểm tra câu có dấu, ba cụm giải thích, ảnh dọc/ngang/vuông, cắt/phóng ảnh và vị trí người nói; nội dung quá dài vẫn báo lỗi.
+- Xem trực tiếp nhận lớp PNG và hình học từ cùng hàm bố cục/phông chữ của bộ xuất. Kiểm thử xác nhận sửa chữ, nghĩa, ảnh, phụ đề không ghi dự án, tạo lịch sử hay tác vụ AI. Gom thao tác 100 ms; phản hồi cũ không ghi đè phản hồi mới, kể cả khi yêu cầu cũ không dừng theo lệnh hủy. Lưu thủ công không bắt buộc dựng MP4; lưu và khôi phục vẫn kiểm tra phiên bản.
+- Đo 20 yêu cầu API đã ấm trên máy này: trung vị **35,70 ms**, lớn nhất **41,13 ms**, chưa cộng thời gian gom thao tác 100 ms và vẽ của trình duyệt. Đây là số đo API trên mẫu, không phải cam kết mọi thao tác đầu tiên đều dưới 300 ms.
+- Tách mã bộ nhớ đệm mặt nạ khỏi nền màu. Dự án thử sử dụng lại foreground/alpha cũ; mã lớp và thời gian sửa alpha không đổi, không gọi mô hình. Ghép lại nền mới cho toàn mẫu mất **35,33 giây**. Kiểm thử riêng cố tình làm bộ chạy mô hình không khả dụng nhưng đổi màu vẫn thành công.
+- Thùng rác được kiểm tra hoàn toàn trong thư mục dữ liệu tạm: 29/30/31 dự án, ngày tạo thay vì lần sửa, dự án diagnostic, tác vụ đang chạy, tạm vượt 30, khôi phục khi đủ 30, giữ ngày tạo, nhập ZIP nhận ngày mới, hết hạn đúng 7 ngày và phục hồi thao tác bị ngắt. Lỗi đổi tên trên Windows giữ dự án chưa chuyển ở trạng thái hoạt động. Kiểm tra đường dẫn sai và junction Windows thật, kể cả liên kết lồng trong thư mục, xác nhận tệp bên ngoài không bị xóa. Hạn xóa được kiểm tra lại cả khi tiếp tục một thao tác purge bị ngắt.
+- API chặn đọc/sửa/chạy tác vụ với dự án trong Thùng rác bằng trạng thái 410. Giao diện nhận thông báo chuyển, giữ bản nháp tại cửa sổ và cung cấp Khôi phục. Dọn khi mở app, tạo/nhập/khôi phục, sau tác vụ và mỗi giờ; giữ bản gốc và bản xuất nằm ngoài thư mục dự án.
+
+### Mẫu xuất thực tế
+
+Dự án thử riêng **Pastel · Xem trực tiếp** (`f7b1f67b6987465f`) chứa bản nguồn sao chép và ảnh đã tải. Sáu dự án có sẵn giữ nguyên phương án, cấu hình, phiên bản, ảnh và ngày tạo; hai dự án legacy không chuyển khung. Không thử xóa trên dự án thật.
+
+| Tệp trong OUTPUT/pastel | Kết quả |
+| --- | --- |
+| `Vietnamese_with_Vinh_pastel_9x16.mp4` | 1080×1920, H.264, AAC stereo, 59,933 giây |
+| `Vietnamese_with_Vinh_pastel_16x9.mp4` | 1920×1080, H.264, AAC stereo, 59,933 giây |
+| `pastel_hai_khung.jpg` | Ảnh đối chiếu hai bố cục mới |
+| `acceptance.json` | Số đo API, kiểm tra dùng lại lớp, thông số xuất, so sánh khung |
+| `unittest.log` | Kết quả toàn bộ kiểm thử Python |
+
+Cả hai MP4 được giải mã hết bằng FFmpeg. Đã kiểm tra trực quan ảnh trích: vị trí phụ đề, khung người nói, tóc/miệng, chữ và vùng ảnh. So sánh khung ghép từ API với khung xuất thu nhỏ tại cùng thời gian nguồn: sai khác trung bình từng kênh trong ba vùng ảnh/chữ/người nói từ **2,00 đến 9,10 trên 255**, gồm nén H.264, thu nhỏ và raster chữ. Đã sửa lỗi làm tròn hộp bên trong về số chẵn khiến bản xem trước lệch 1 pixel; chỉ kích thước canvas H.264 cần số chẵn.
+
+**Giới hạn kiểm tra giao diện:** trình duyệt tự động đang tắt trong Work settings. Đã kiểm tra API thật, bộ điều phối yêu cầu, build, PNG và hai video xuất; chưa kiểm chứng thao tác chuột hoặc thời gian hiển thị đầu cuối trong trình duyệt ở lượt này. Tài nguyên/thử nghiệm và dữ liệu riêng nằm ngoài Git.
+
+---
+
 ## Biểu tượng Vietnamese with Vinh trong Start menu
 
 Đã tạo shortcut **Vietnamese with Vinh.lnk** tại thư mục gốc ứng dụng và thư mục Programs của Start menu cá nhân. Đọc lại bằng Windows COM để xác nhận tệp đích pythonw.exe, đối số có dấu ngoặc cho đường dẫn chứa khoảng trắng, thư mục làm việc và biểu tượng riêng đều đúng. Tệp cài lại là **TAO_BIEU_TUONG_START.cmd**; shortcut chứa đường dẫn tại máy nên được loại khỏi Git.

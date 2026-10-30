@@ -18,6 +18,7 @@ from .media import probe
 from .providers import connection_checks, search_photos, download_photo
 from .timeline import validate_plan, keep_spans
 from .matting_schema import BackgroundRemoval, validate_duration
+from .timeline import PhotoCrop
 
 class Options(BaseModel):
     model_config=ConfigDict(extra='ignore',allow_inf_nan=False)
@@ -45,6 +46,28 @@ class SavePlan(BaseModel):
     revision: int
     plan: dict
     options: Options
+    render_preview: bool=True
+
+class DraftChunk(BaseModel):
+    vi: str=Field(default='',max_length=100)
+    en: str=Field(default='',max_length=140)
+
+class DraftLesson(BaseModel):
+    vi: str=Field(default='',max_length=800)
+    en: str=Field(default='',max_length=1000)
+    chunks: list[DraftChunk]=Field(default_factory=list,max_length=3)
+    asset_id: str | None=None
+    photo_crops: dict[Literal['9:16','16:9'],PhotoCrop]=Field(default_factory=dict)
+
+class DraftCaption(BaseModel):
+    vi: str=Field(default='',max_length=1000)
+    en: str=Field(default='',max_length=1500)
+
+class PreviewScene(BaseModel):
+    sequence: int=Field(default=0,ge=0)
+    lesson: DraftLesson
+    caption: DraftCaption | None=None
+    options: Options
 
 class RevisionBody(BaseModel):
     prompt: str=Field(min_length=3,max_length=2000)
@@ -55,6 +78,7 @@ class PhotoBody(BaseModel):
 
 class RestoreBody(BaseModel):
     revision: int=Field(ge=1)
+    render_preview: bool=True
 
 class PhotoPoolBody(BaseModel):
     revision: int=Field(ge=1)
@@ -63,10 +87,21 @@ class PhotoPoolBody(BaseModel):
 @asynccontextmanager
 async def lifespan(app):
     store.init()
+    from . import retention
+    await asyncio.to_thread(retention.sweep)
     worker.start()
-    yield
+    async def maintain():
+        while True:
+            await asyncio.sleep(3600)
+            await asyncio.to_thread(retention.sweep)
+    maintenance=asyncio.create_task(maintain())
+    try:yield
+    finally:
+        maintenance.cancel()
+        try:await maintenance
+        except asyncio.CancelledError:pass
 
-app=FastAPI(title='VietCut Studio',version='1.3.0',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.4.0',lifespan=lifespan)
 
 @app.middleware('http')
 async def local_access(request:Request,call_next):
@@ -89,6 +124,10 @@ async def value_error(request,exc):
 @app.exception_handler(KeyError)
 async def key_error(request,exc):
     return JSONResponse({'detail':'Không tìm thấy tài nguyên.'},404)
+
+@app.exception_handler(store.TrashedProject)
+async def trashed_project(request,exc):
+    return JSONResponse({'detail':str(exc),'trashed':True},410)
 
 def project_read(project_id):
     project=store.read(project_id)
@@ -124,11 +163,32 @@ def create(source:Path,title,options,project_id=None,move=False):
     project={'id':project_id,'title':title[:120] or 'Bài học mới','source_file':target.name,'original_name':source.name,'metadata':metadata,'options':values,'status':'new','revision':0,'plan':None,'transcript':None,'assets':{},'frames':[],'warnings':[],'preview':None,'export':None,'music_file':None,'created_at':store.now()}
     store.save(project)
     store.job_create(project_id,'pipeline')
+    from .retention import sweep
+    sweep(protect=project_id)
     return project_read(project_id)
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.3.0'}
+    return {'ok':True,'app':'vietcut','version':'1.4.0'}
+
+@app.get('/api/trash')
+def trash():
+    from .retention import trash_list
+    return trash_list()
+
+@app.post('/api/trash/{project_id}/restore')
+def restore_trash(project_id:str):
+    from .retention import restore
+    restore(project_id)
+    return project_read(project_id)
+
+@app.post('/api/projects/{project_id}/preview-scene')
+def preview_scene(project_id:str,body:PreviewScene):
+    from .live_preview import scene
+    project=store.read(project_id)
+    if project['options'].get('layout_mode')!='lesson':raise ValueError('Xem trực tiếp dùng cho khung bài học.')
+    project={**project,'options':body.options.model_dump()}
+    return scene(project,store.folder(project_id),body.lesson.model_dump(),body.caption.model_dump() if body.caption else None,body.sequence)
 
 @app.get('/api/matting/status')
 def matting_status():
@@ -182,7 +242,7 @@ def get_project(project_id:str):
     return project_read(project_id)
 
 @app.post('/api/projects/{project_id}/jobs/{kind}')
-def create_job(project_id:str,kind:Literal['pipeline','preview','export']):
+def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker']):
     project=store.read(project_id)
     if kind!='pipeline' and not project.get('plan'):
         raise ValueError('Cần tạo phương án dựng trước.')
@@ -241,7 +301,10 @@ async def events(project_id:str,request:Request):
     async def stream():
         previous=''
         while not await request.is_disconnected():
-            project=store.read(project_id)
+            try:project=store.read(project_id)
+            except store.TrashedProject:
+                yield 'data: '+json.dumps({'trashed':True,'id':project_id})+'\n\n'
+                return
             snapshot={'jobs':store.jobs(project_id),'revision':project['revision'],'status':project['status'],'preview':project.get('preview'),'export':project.get('export')}
             payload=json.dumps(snapshot,ensure_ascii=False)
             if payload!=previous:
@@ -277,7 +340,7 @@ def save_plan(project_id:str,body:SavePlan):
             from .templates import validate_text_layout
             validate_text_layout({**project,'options':options},plan)
         store.update(project_id,plan=plan,options=options,revision=project['revision']+1)
-        store.job_create(project_id,'preview')
+        if body.render_preview:store.job_create(project_id,'preview')
     return project_read(project_id)
 
 @app.post('/api/projects/{project_id}/revise')
@@ -319,7 +382,7 @@ def restore(project_id:str,body:RestoreBody):
         restored_options=Options.model_validate(old['options']).model_dump()
         validate_duration(restored_options,project['metadata']['duration'])
         store.update(project_id,plan=restored,options=restored_options,revision=project['revision']+1)
-        store.job_create(project_id,'preview')
+        if body.render_preview:store.job_create(project_id,'preview')
     return project_read(project_id)
 
 @app.get('/api/photos/search')
@@ -415,7 +478,7 @@ def matting_frame(project_id:str,time:float=0,background:Literal['cream','black'
         result=project.get('matting')
         if not result:raise HTTPException(404,'Chưa có kết quả xóa phông. Lưu và dựng xem trước trước khi so sánh.')
         # Never trust a saved path from an imported project. Import drops generated result metadata.
-        code=result.get('code','')
+        code=result.get('layer_code',result.get('code',''))
         import re
         if not re.fullmatch(r'[a-f0-9]{24}',code):raise ValueError('Bộ nhớ đệm không hợp lệ.')
         part=folder/'matting'/code/f'{frame//600:05}'
@@ -483,6 +546,10 @@ def import_project(file:UploadFile=File(...)):
                 with archive.open(info) as source,target.open('wb') as dest:
                     shutil.copyfileobj(source,dest,length=1024*1024)
         project=json.loads((folder/'project.json').read_text(encoding='utf-8'))
+        project.pop('_retention',None)
+        project.pop('diagnostic',None)
+        project['origin_created_at']=project.get('origin_created_at') or project.get('created_at')
+        project['created_at']=store.now()
         source=(folder/project['source_file']).resolve()
         if not source.is_relative_to(folder.resolve()) or not source.name.startswith('source.'):
             raise ValueError('Đường dẫn video nguồn không hợp lệ.')
@@ -503,6 +570,8 @@ def import_project(file:UploadFile=File(...)):
             raise ValueError('Đường dẫn nhạc không hợp lệ.')
         store.save(project)
         store.job_create(project_id,'preview' if project.get('plan') else 'pipeline')
+        from .retention import sweep
+        sweep(protect=project_id)
         return project_read(project_id)
     except (zipfile.BadZipFile,KeyError,json.JSONDecodeError):
         raise ValueError('Không đọc được dự án VietCut.')

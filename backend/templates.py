@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .photo_layout import cover
 from .config import ROOT
 
-TEMPLATE_VERSION=2
+TEMPLATE_VERSION=3
 FONT_DIR=ROOT/'assets/fonts'
 
 def brand():
@@ -22,6 +22,7 @@ def signature():
         digest.update(path.read_bytes())
     return digest.hexdigest()
 
+@lru_cache(maxsize=128)
 def font(size,bold=False,serif=False):
     result=ImageFont.truetype(str(FONT_DIR/('NotoSerif.ttf' if serif else 'NotoSans.ttf')),max(1,round(size)))
     axes=result.get_variation_axes()
@@ -34,10 +35,12 @@ def geometry(w,h):
     ref_w,ref_h=(1080,1920) if portrait else (1920,1080)
     sx,sy=w/ref_w,h/ref_h
     def rect(x,y,rw,rh):
-        return tuple(round(value*scale)//2*2 for value,scale in [(x,sx),(y,sy),(rw,sx),(rh,sy)])
-    return {'portrait':portrait,'speaker':rect(46,108,988,570) if portrait else rect(28,32,604,1016),
-            'content':rect(46,716,988,480) if portrait else rect(686,92,1180,466),
-            'photo':rect(46,1234,988,580) if portrait else rect(686,600,1180,448),
+        # Only the output canvas needs even dimensions for H.264. Rounding each
+        # inner box to even pixels shifts/crops the half-size live preview.
+        return tuple(round(value*scale) for value,scale in [(x,sx),(y,sy),(rw,sx),(rh,sy)])
+    return {'portrait':portrait,'speaker':rect(46,1208,988,570) if portrait else rect(28,32,604,1016),
+            'content':rect(46,692,988,484) if portrait else rect(686,92,1180,466),
+            'photo':rect(46,96,988,566) if portrait else rect(686,600,1180,448),
             'brand':rect(46,26,988,52) if portrait else rect(686,28,1180,42),
             'radius':round(36*min(sx,sy)),'scale':min(sx,sy)}
 
@@ -77,32 +80,24 @@ def draw_centered(draw,rect,text,max_size,min_size,color,bold=False,serif=False,
 @lru_cache(maxsize=6)
 def paper(w,h,theme_signature):
     b=brand()
-    base=np.array(Image.new('RGB',(w,h),b['paper']),dtype=np.int16)
-    noise=np.random.default_rng(41).integers(-2,3,size=(h,w,1),dtype=np.int16)
-    image=Image.fromarray(np.clip(base+noise,0,255).astype(np.uint8),'RGB').convert('RGBA')
-    draw=ImageDraw.Draw(image)
-    draw.ellipse((-w*.2,-h*.08,w*.21,h*.11),fill='#f6df9f')
-    draw.ellipse((w*.93,h*.10,w*1.13,h*.30),fill='#efa38a')
-    draw.ellipse((-w*.11,h*.91,w*.22,h*1.12),fill='#217776')
-    draw.ellipse((w*.90,h*.95,w*1.18,h*1.15),fill='#df795c')
-    return image
+    return Image.new('RGBA',(w,h),b['paper'])
 
 def rounded_mask(size,radius):
     image=Image.new('L',size,0)
     ImageDraw.Draw(image).rounded_rectangle((0,0,size[0]-1,size[1]-1),radius=radius,fill=255)
     return image
 
-def make_frame(project,lesson,folder,w,h,target):
+def make_frame(project,lesson,folder,w,h,target=None):
     g=geometry(w,h);b=brand();s=g['scale']
     image=paper(w,h,signature()).copy();draw=ImageDraw.Draw(image)
     bx,by,bw,bh=g['brand']
     draw_centered(draw,(bx,by,bw,bh),b['name'],29*s,21*s,b['ink'],bold=True,max_lines=1)
     x,y,sw,sh=g['speaker']
     pad=max(2,round(5*s))
-    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g['radius']+pad,fill='#eadfce')
+    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g['radius']+pad,fill=b['border'])
     draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g['radius'],fill=b['paper'])
     cx,cy,cw,ch=g['content']
-    draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill='#fffaf0')
+    draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill=b['card'])
     inset=round(30*s);iw=cw-2*inset
     chunks=lesson.get('chunks',[])
     chip_height=round(82*s) if chunks else 0
@@ -113,13 +108,13 @@ def make_frame(project,lesson,folder,w,h,target):
     en_rect=(cx+inset,cy+inset+vi_height+gap,iw,en_height)
     max_vi=(176 if g['portrait'] else 158)*s
     draw_centered(draw,vi_rect,lesson['vi'],max_vi,44*s,b['ink'],True,not g['portrait'],5)
-    # A small gold brush-like rule separates the target sentence from its meaning.
+    # A quiet pastel rule separates the target sentence from its meaning.
     line_y=round(cy+inset+vi_height+gap*.35)
     draw.rounded_rectangle((cx+cw*.22,line_y,cx+cw*.78,line_y+max(2,round(5*s))),radius=max(1,round(3*s)),fill=b['gold'])
     draw_centered(draw,en_rect,lesson['en'],(78 if g['portrait'] else 72)*s,28*s,b['accent'],True,not g['portrait'],4)
     if chunks:
         spacing=round(12*s);chip_w=(iw-(len(chunks)-1)*spacing)/len(chunks)
-        colors=['#e2ead9','#f9e6b3','#f7d6c3']
+        colors=[b['pastel'],'#EEF3F7','#E9EEF1']
         for i,chunk in enumerate(chunks):
             xx=cx+inset+i*(chip_w+spacing);yy=cy+ch-inset-chip_height
             draw.rounded_rectangle((xx,yy,xx+chip_w,yy+chip_height),radius=round(18*s),fill=colors[i])
@@ -135,12 +130,22 @@ def make_frame(project,lesson,folder,w,h,target):
             photo=cover(raw,(pw,ph),lesson.get('photo_crops',{}).get(ratio))
         image.paste(photo,(px,py),mask)
     else:
-        fill=Image.new('RGB',(pw,ph),'#e5ecdf');pd=ImageDraw.Draw(fill)
-        pd.ellipse((pw*.2,ph*.12,pw*.8,ph*.9),fill='#d4e1d1')
+        fill=Image.new('RGB',(pw,ph),b['pastel']);pd=ImageDraw.Draw(fill)
         draw_centered(pd,(pw*.12,ph*.25,pw*.76,ph*.5),lesson['vi'],70*s,30*s,b['ink'],True,max_lines=4)
         image.paste(fill,(px,py),mask)
+    if target is None:return image.convert('RGB')
     image.convert('RGB').save(target)
     return g
+
+
+def subtitle_region(w,h):
+    g=geometry(w,h)
+    return g['photo'] if g['portrait'] else g['speaker']
+
+
+def subtitle_position(w,h,tw,th):
+    x,y,sw,sh=subtitle_region(w,h)
+    return x+(sw-tw)//2,y+sh-th-round(20*geometry(w,h)['scale'])
 
 def validate_text_layout(project,plan):
     # Validate in export geometry before queuing expensive media work.

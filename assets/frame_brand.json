@@ -1,8 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "name": "Vietnamese with Vinh",
-  "paper": "#fbf5e9",
-  "ink": "#063c40",
-  "accent": "#cb4822",
-  "gold": "#efc35b"
+  "paper": "#F7F3EB",
+  "card": "#FFFFFF",
+  "pastel": "#DCEAF4",
+  "ink": "#163247",
+  "accent": "#456479",
+  "gold": "#DCEAF4",
+  "border": "#DCE4E8"
 }

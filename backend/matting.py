@@ -56,27 +56,18 @@ def cache_identity(project, folder):
     source = folder/project['source_file']
     w,h = project['metadata']['width'], project['metadata']['height']
     scale = min(1,1920/max(w,h)); w,h = max(2,round(w*scale)//2*2),max(2,round(h*scale)//2*2)
-    paper=json.loads((ROOT/'assets/frame_brand.json').read_text(encoding='utf-8'))['paper']
-    identity = {'v':MATTING_VERSION,'source':file_hash(source),'model':MODELS[cfg.device], 'config':cfg.model_dump(), 'size':[w,h], 'fps':30, 'network_max':512, 'paper':paper}
+    identity = {'v':MATTING_VERSION,'source':file_hash(source),'model':MODELS[cfg.device], 'config':cfg.model_dump(), 'size':[w,h], 'fps':30, 'network_max':512}
     code = hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()[:24]
     return code,identity
 
 
-def ensure_matting(project, context):
-    cfg = validate_duration(project['options'],project['metadata']['duration'])
-    if not cfg.enabled: return None
-    code,identity = cache_identity(project,context.folder)
-    folder = context.folder/'matting'/code; folder.mkdir(parents=True,exist_ok=True)
-    manifest = folder/'manifest.json'
-    if manifest.is_file():
-        result = json.loads(manifest.read_text(encoding='utf-8'))
-        if (folder/'composition.mp4').is_file(): return result
+def _run_layers(project,context,folder,identity,cfg):
     status = runtime_status()
     if not status['installed'] or not status['models'][cfg.device]:
         raise ValueError('Bộ xóa phông/mô hình chưa sẵn sàng. Chạy CAI_DAT_XOA_PHONG.cmd hoặc tắt Xóa phông rồi lưu lại.')
     if cfg.device == 'cuda' and not status['cuda']:
         raise ValueError('GPU chưa sẵn sàng. Chọn rõ Chạy CPU (chậm hơn) hoặc tắt Xóa phông; app không tự chuyển sang CPU.')
-    request = {**identity,'source':str((context.folder/project['source_file']).resolve()),'model':str(model_path(cfg.device).resolve()), 'model_sha256':MODELS[cfg.device]['sha256'], 'folder':str(folder.resolve()),'duration':project['metadata']['duration'],'ffmpeg':binary('ffmpeg')}
+    request = {**identity,'paper':json.loads((ROOT/'assets/frame_brand.json').read_text(encoding='utf-8'))['paper'],'source':str((context.folder/project['source_file']).resolve()),'model':str(model_path(cfg.device).resolve()), 'model_sha256':MODELS[cfg.device]['sha256'], 'folder':str(folder.resolve()),'duration':project['metadata']['duration'],'ffmpeg':binary('ffmpeg')}
     atomic_json(folder/'request.json', request)
     progress_file = folder/'progress.json'
     # Allocate an explicit progress range even when AI planning has already advanced the job.
@@ -108,12 +99,59 @@ def ensure_matting(project, context):
             errors.seek(0,2);size=errors.tell();errors.seek(max(0,size-1800))
             raise RuntimeError('Xóa phông chưa hoàn tất: '+errors.read().decode('utf-8','replace')[-1500:])
     stats=json.loads((folder/'stats.json').read_text(encoding='utf-8'))
-    # Join only committed chunks. CFR source time survives cuts and resume.
-    count=math.ceil(math.ceil(request['duration']*30)/600)
+    return stats
+
+
+def _complete_layers(folder,duration):
+    total=math.ceil(duration*30)
+    for index in range(math.ceil(total/600)):
+        part=folder/f'{index:05}'
+        if not all((part/n).is_file() for n in ['complete.json','foreground.mp4','alpha.mkv']):return False
+        try:
+            if json.loads((part/'complete.json').read_text())['frames']!=min(600,total-index*600):return False
+        except (OSError,ValueError,KeyError):return False
+    return True
+
+
+def ensure_matting(project,context):
+    cfg=validate_duration(project['options'],project['metadata']['duration'])
+    if not cfg.enabled:return None
+    layer_key,identity=cache_identity(project,context.folder)
+    paper=json.loads((ROOT/'assets/frame_brand.json').read_text(encoding='utf-8'))['paper']
+    code=hashlib.sha256(json.dumps({'layers':layer_key,'paper':paper,'composition':1},sort_keys=True).encode()).hexdigest()[:24]
+    root=context.folder/'matting';folder=root/code;folder.mkdir(parents=True,exist_ok=True)
+    manifest=folder/'manifest.json'
+    if manifest.is_file() and (folder/'composition.mp4').is_file():return json.loads(manifest.read_text(encoding='utf-8'))
+    duration=project['metadata']['duration'];layers=root/layer_key;stats=None;reused=False
+    # Adopt completed v2 layer pairs without rewriting or rerunning their model.
+    for path in sorted(root.glob('*/manifest.json')):
+        context.check()
+        try:
+            saved=json.loads(path.read_text(encoding='utf-8'))
+            old={k:v for k,v in saved['identity'].items() if k!='paper'}
+            candidate=root/saved.get('layer_code',saved['code'])
+            if candidate.parent.resolve()!=root.resolve():continue
+            if old==identity and _complete_layers(candidate,duration):
+                layers=candidate;stats=saved['stats'];reused=True;break
+        except (OSError,ValueError,KeyError):continue
+    if stats is None:
+        layers.mkdir(parents=True,exist_ok=True)
+        if _complete_layers(layers,duration) and (layers/'stats.json').is_file():
+            stats=json.loads((layers/'stats.json').read_text(encoding='utf-8'));reused=True
+        else:stats=_run_layers(project,context,layers,identity,cfg)
+    started=time.perf_counter();total=math.ceil(duration*30);count=math.ceil(total/600);chunks=[]
+    w,h=identity['size']
+    for index in range(count):
+        context.check();context.progress(55+20*index/count,f'Ghép nền pastel từ mặt nạ đã lưu · {index+1}/{count}')
+        part=layers/f'{index:05}';frames=min(600,total-index*600)
+        target=folder/f'part-{index:05}.mp4';chunks.append(target)
+        if target.is_file() and target.with_suffix('.json').is_file():continue
+        filters='[0:v]setpts=N/(30*TB),format=rgb24[f];[1:v]setpts=N/(30*TB),format=gray[a];[f][a]alphamerge[person];[2:v][person]overlay=shortest=1:format=auto,format=yuv420p[out]'
+        ffmpeg(['-filter_complex_threads','1','-i',part/'foreground.mp4','-i',part/'alpha.mkv','-f','lavfi','-i',f'color=c={paper}:s={w}x{h}:r=30','-filter_complex',filters,'-map','[out]','-frames:v',frames,'-an','-c:v','libx264','-preset','veryfast','-crf','18',target],context)
+        atomic_json(target.with_suffix('.json'),{'frames':frames})
     concat=folder/'concat.txt'
-    concat.write_text('\n'.join("file '"+str((folder/f'{i:05}/composition.mp4').resolve()).replace('\\','/').replace("'","'\\''")+"'" for i in range(count)),encoding='utf-8')
-    ffmpeg(['-f','concat','-safe','0','-i',concat,'-i',context.folder/project['source_file'],'-map','0:v:0','-map','1:a:0','-c','copy','-t',request['duration'],'-movflags','+faststart',folder/'composition.tmp.mp4'],context)
+    concat.write_text('\n'.join("file '"+str(p.resolve()).replace('\\','/').replace("'","'\\''")+"'" for p in chunks),encoding='utf-8')
+    ffmpeg(['-f','concat','-safe','0','-i',concat,'-i',context.folder/project['source_file'],'-map','0:v:0','-map','1:a:0','-c','copy','-t',duration,'-movflags','+faststart',folder/'composition.tmp.mp4'],context)
     (folder/'composition.tmp.mp4').replace(folder/'composition.mp4')
-    result={'code':code,'file':(folder/'composition.mp4').relative_to(context.folder).as_posix(),'identity':identity,'stats':stats,'warnings':stats.get('warnings',[])}
-    atomic_json(manifest,result)
-    return result
+    result={'code':code,'layer_code':layers.name,'file':(folder/'composition.mp4').relative_to(context.folder).as_posix(),'identity':{**identity,'paper':paper},'stats':stats,'warnings':stats.get('warnings',[]),'paper':paper,'reused_layers':reused,'composition_seconds':time.perf_counter()-started}
+    atomic_json(manifest,result);return result

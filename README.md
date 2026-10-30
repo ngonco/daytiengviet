@@ -4,6 +4,14 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Khung pastel, xem trực tiếp và Thùng rác (v1.4)
+
+Video dọc đặt **ảnh trên → từ/câu ở giữa → người nói dưới khoảng 30%**. Phụ đề song ngữ nằm ở đáy ảnh trên. Video ngang giữ bố cục người nói trái, bài học phải. Cả hai dùng be/trắng/xanh pastel, chữ navy, viền mảnh và tên kênh nhỏ.
+
+Trong **Bản dựng**, chữ, ảnh, cách cắt và vị trí người nói cập nhật trực tiếp, không cần đợi dựng MP4. Bấm **Lưu** để giữ thay đổi và lịch sử; **Xuất video** dùng bản đã lưu. Nhạc/hiệu ứng âm thanh và cân âm lượng được áp dụng khi xuất. Nội dung quá dài có thông báo; khung giữ trạng thái hợp lệ gần nhất. Tác vụ AI/xóa phông vẫn cần thời gian xử lý và có tiến độ; app báo rõ khi lớp người nói chưa cập nhật. Đổi màu nền tận dụng lớp người/mặt nạ đã có.
+
+App giữ **tối đa 30 dự án hoạt động**, chuyển dự án có **ngày tạo cũ nhất** vào **Thùng rác 7 ngày**. Dự án đang xử lý được giữ tới khi tác vụ kết thúc. Mở **Thùng rác → Khôi phục** để lấy lại; nếu đang đủ 30, một dự án khác cũ nhất sẽ chuyển vào thùng rác. Sau 7 ngày, app xóa hẳn dữ liệu trong thư mục dự án khi đang chạy hoặc lần mở tiếp theo. Video nguồn gốc và bản xuất nằm ngoài thư mục dự án được giữ nguyên. Dữ liệu trong thùng rác vẫn chiếm dung lượng cho tới khi được dọn.
+
 ## Khung không blur và 10 ảnh mỗi mục (v1.3)
 
 Ô người nói giữ nguyên kích thước, nền kem phẳng và viền bo góc mảnh; không còn hình mờ mở rộng hai bên. Ảnh minh họa phủ kín ô ở cả 9:16 và 16:9, giữ tỷ lệ và cắt mép dư. Trong tab **Bài học**, kéo ảnh hoặc dùng thanh vị trí/phóng 1–3×; **Đặt lại** đưa về giữa. Mỗi tỷ lệ lưu cách cắt riêng. Đổi sang ảnh khác đặt lại cách cắt; bấm **Lưu & dựng lại** để áp dụng.

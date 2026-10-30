@@ -5,9 +5,9 @@ from PIL import Image,ImageDraw
 from .timeline import keep_spans,map_interval
 from .media import ffmpeg
 from .store import atomic_json
-from .templates import geometry,signature,make_frame,rounded_mask,speaker_focus,font,fit_text
+from .templates import geometry,signature,make_frame,rounded_mask,speaker_focus,font,fit_text,subtitle_region,subtitle_position
 
-LESSON_RENDER_VERSION=4
+LESSON_RENDER_VERSION=5
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -22,8 +22,8 @@ def mapped_lessons(plan,spans):
                 result.append({**lesson,'output_start':a,'output_end':b})
     return result
 
-def subtitle_image(caption,w,h,target):
-    g=geometry(w,h);_,_,sw,sh=g['speaker'];s=g['scale']
+def subtitle_image(caption,w,h,target=None):
+    g=geometry(w,h);_,_,sw,sh=subtitle_region(w,h);s=g['scale']
     width=sw-round(40*s);padding=max(4,round(12*s))
     max_height=sh*.34
     vi_font,vi_lines,vi_lh=fit_text(caption['vi'],width-2*padding,max_height*.53-2*padding,32*s,24*s,True,max_lines=2)
@@ -34,13 +34,14 @@ def subtitle_image(caption,w,h,target):
         en_lines=[];en_lh=0;en_font=font(20*s)
     height=round(len(vi_lines)*vi_lh+len(en_lines)*en_lh+padding*2+4*s)
     image=Image.new('RGBA',(width,height),(0,0,0,0));draw=ImageDraw.Draw(image)
-    draw.rounded_rectangle((0,0,width-1,height-1),radius=max(4,round(18*s)),fill=(20,27,25,185))
+    draw.rounded_rectangle((0,0,width-1,height-1),radius=max(4,round(18*s)),fill=(22,50,71,218))
     y=padding
     for line in vi_lines:
         draw.text((width/2,y),line,font=vi_font,fill='white',anchor='mt');y+=vi_lh
     y+=round(4*s)
     for line in en_lines:
-        draw.text((width/2,y),line,font=en_font,fill='#f4f2ed',anchor='mt');y+=en_lh
+        draw.text((width/2,y),line,font=en_font,fill='#F2F7FB',anchor='mt');y+=en_lh
+    if target is None:return image
     image.save(target)
     return width,height
 
@@ -120,7 +121,8 @@ def render_lessons(project,plan,transcript,context,preview=True):
             with Image.open(path) as im:tw,th=im.size
             args+=['-loop','1','-framerate','30','-i',path]
             a=max(0,caption['output_start']-start);b=min(end,caption['output_end'])-start
-            filters.append(f"[{current}][{next_input}:v]overlay={sx+(cw-tw)//2}:{sy+ch-th-round(20*g['scale'])}:enable='gte(t,{a})*lt(t,{b})'[sub{j}]")
+            subx,suby=subtitle_position(w,h,tw,th)
+            filters.append(f"[{current}][{next_input}:v]overlay={subx}:{suby}:enable='gte(t,{a})*lt(t,{b})'[sub{j}]")
             current=f'sub{j}';next_input+=1
         ffmpeg(['-filter_complex_threads','1',*args,'-filter_complex',';'.join(filters),'-map',f'[{current}]','-map','[audio]','-t',length,'-c:v','libx264','-preset','veryfast' if preview else 'fast','-crf','25' if preview else '20','-pix_fmt','yuv420p','-c:a','pcm_s16le','-ar','48000',chunk],context)
         atomic_json(cache/'complete.json',{'duration':length})

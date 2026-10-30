@@ -52,7 +52,11 @@ def execute(job):
     project=store.read(job['project_id'])
     request=json.loads(job['request'])
     store.update(project['id'],status='working')
-    if job['kind']=='lesson_photos':
+    if job['kind']=='prepare_speaker':
+        from .matting import ensure_matting
+        result=ensure_matting(project,context)
+        store.update(project['id'],matting=result,status='ready')
+    elif job['kind']=='lesson_photos':
         from .photo_pools import prepare_pool,apply_pool
         import copy
         plan=copy.deepcopy(project['plan'])
@@ -129,6 +133,9 @@ def loop():
             message=str(exc)[:2500]
             store.job_update(job['id'],status='failed',message='Chưa hoàn tất',error=message)
             store.update(job['project_id'],status='error')
+        finally:
+            from .retention import sweep
+            sweep()
 
 def start():
     thread=threading.Thread(target=loop,name='vietcut-worker',daemon=True)
