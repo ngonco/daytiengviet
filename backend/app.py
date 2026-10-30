@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
+import math
+import subprocess
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ConfigDict
 from PIL import Image, ImageOps
@@ -15,6 +17,7 @@ from .config import ROOT, settings
 from .media import probe
 from .providers import connection_checks, search_photos, download_photo
 from .timeline import validate_plan, keep_spans
+from .matting_schema import BackgroundRemoval, validate_duration
 
 class Options(BaseModel):
     model_config=ConfigDict(extra='ignore',allow_inf_nan=False)
@@ -31,6 +34,7 @@ class Options(BaseModel):
     speaker_x: float | None=Field(default=None,ge=0,le=1)
     speaker_y: float | None=Field(default=None,ge=0,le=1)
     speaker_scale: float=Field(default=1,ge=.65,le=1.5)
+    background_removal: BackgroundRemoval=Field(default_factory=BackgroundRemoval)
 
 class SampleBody(BaseModel):
     filename: str
@@ -58,7 +62,7 @@ async def lifespan(app):
     worker.start()
     yield
 
-app=FastAPI(title='VietCut Studio',version='1.1.0',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.2.0',lifespan=lifespan)
 
 @app.middleware('http')
 async def local_access(request:Request,call_next):
@@ -107,6 +111,9 @@ def create(source:Path,title,options,project_id=None,move=False):
     # Missing fields in OLD projects mean legacy; missing fields on NEW creation mean lesson.
     if 'layout_mode' not in options.model_fields_set:
         values['layout_mode']='lesson'
+    if 'background_removal' not in options.model_fields_set:
+        values['background_removal']['enabled']=True
+    validate_duration(values,metadata['duration'])
     if values['style']=='auto':
         portrait=values['ratio']=='9:16' or values['ratio']=='original' and metadata['height']>metadata['width']
         values['style']='energetic' if portrait else 'education'
@@ -117,7 +124,12 @@ def create(source:Path,title,options,project_id=None,move=False):
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.1.0'}
+    return {'ok':True,'app':'vietcut','version':'1.2.0'}
+
+@app.get('/api/matting/status')
+def matting_status():
+    from .matting import runtime_status
+    return runtime_status()
 
 @app.get('/api/settings')
 def get_settings():
@@ -218,6 +230,7 @@ def save_plan(project_id:str,body:SavePlan):
                 raise ValueError('Ảnh chưa được tải vào dự án.')
         worker.version(project)
         options=body.options.model_dump()
+        validate_duration(options,project['metadata']['duration'])
         if options['style']=='auto':
             portrait=options['ratio']=='9:16' or options['ratio']=='original' and project['metadata']['height']>project['metadata']['width']
             options['style']='energetic' if portrait else 'education'
@@ -265,6 +278,7 @@ def restore(project_id:str,body:RestoreBody):
         worker.version(project)
         restored=validate_plan(old['plan'],project['metadata']['duration'])
         restored_options=Options.model_validate(old['options']).model_dump()
+        validate_duration(restored_options,project['metadata']['duration'])
         store.update(project_id,plan=restored,options=restored_options,revision=project['revision']+1)
         store.job_create(project_id,'preview')
     return project_read(project_id)
@@ -348,6 +362,35 @@ def media(project_id:str,relative:str):
         raise HTTPException(404,'Không tìm thấy tệp.')
     return FileResponse(path)
 
+@app.get('/api/projects/{project_id}/matting/frame')
+def matting_frame(project_id:str,time:float=0,background:Literal['cream','black','white']='cream',before:bool=False):
+    from .config import binary
+    if not math.isfinite(time):raise ValueError('Mốc thời gian không hợp lệ.')
+    project=store.read(project_id);folder=store.folder(project_id)
+    at=max(0,min(time,project['metadata']['duration']-1/30))
+    frame=max(0,min(math.ceil(project['metadata']['duration']*30)-1,round(at*30)))
+    args=[binary('ffmpeg'),'-hide_banner','-loglevel','error','-threads','2','-filter_complex_threads','1']
+    if before:
+        args+=['-ss',str(at),'-i',str(folder/project['source_file']),'-vf','scale=640:640:force_original_aspect_ratio=decrease']
+    else:
+        result=project.get('matting')
+        if not result:raise HTTPException(404,'Chưa có kết quả xóa phông. Lưu và dựng xem trước trước khi so sánh.')
+        # Never trust a saved path from an imported project. Import drops generated result metadata.
+        code=result.get('code','')
+        import re
+        if not re.fullmatch(r'[a-f0-9]{24}',code):raise ValueError('Bộ nhớ đệm không hợp lệ.')
+        part=folder/'matting'/code/f'{frame//600:05}'
+        if not (part/'complete.json').is_file():raise HTTPException(404,'Đoạn xóa phông này chưa hoàn tất.')
+        local=frame%600;w,h=result['identity']['size'];color={'cream':result['identity']['paper'],'black':'#000000','white':'#ffffff'}[background]
+        # H.264 and FFV1 have different time bases. Exact frame trims avoid a blank
+        # overlay when timestamp seeking skips the last alpha or offsets the streams.
+        trim=f'trim=start_frame={local}:end_frame={local+1},setpts=PTS-STARTPTS'
+        args+=['-i',str(part/'foreground.mp4'),'-i',str(part/'alpha.mkv'),'-f','lavfi','-i',f'color=c={color}:s={w}x{h}:r=30','-filter_complex',f'[0:v]{trim}[f];[1:v]{trim}[a];[f][a]alphamerge[fg];[2:v][fg]overlay=shortest=1,scale=640:640:force_original_aspect_ratio=decrease[out]','-map','[out]']
+    args+=['-frames:v','1','-f','image2pipe','-c:v','png','pipe:1']
+    output=subprocess.run(args,capture_output=True,timeout=30,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    if output.returncode:raise ValueError('Chưa đọc được khung hình; thử một mốc gần đó.')
+    return Response(output.stdout,media_type='image/png',headers={'Cache-Control':'no-store'})
+
 @app.get('/api/projects/{project_id}/download/{kind}')
 def download(project_id:str,kind:Literal['video','vi','en','project','credits']):
     project=store.read(project_id)
@@ -357,7 +400,8 @@ def download(project_id:str,kind:Literal['video','vi','en','project','credits'])
     folder=store.folder(project_id)
     if kind=='project':
         target=folder/'project-backup.zip'
-        store.atomic_json(folder/'project.json',project)
+        portable={k:v for k,v in project.items() if k!='matting'}
+        store.atomic_json(folder/'project.json',portable)
         with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
             for p in [folder/'project.json',folder/project['source_file']]:
                 archive.write(p,p.relative_to(folder))
@@ -405,6 +449,8 @@ def import_project(file:UploadFile=File(...)):
             raise ValueError('Đường dẫn video nguồn không hợp lệ.')
         metadata=probe(source)
         project.update(id=project_id,metadata=metadata,status='ready',preview=None,export=None,jobs=[],frames=[],options=Options.model_validate(project['options']).model_dump())
+        project.pop('matting',None)
+        validate_duration(project['options'],metadata['duration'])
         if project.get('plan'):
             project['plan']=validate_plan(project['plan'],metadata['duration'])
         for asset in project.get('assets',{}).values():

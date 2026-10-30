@@ -7,7 +7,7 @@ from .media import ffmpeg
 from .store import atomic_json
 from .templates import geometry,signature,make_frame,rounded_mask,speaker_focus,font,fit_text
 
-LESSON_RENDER_VERSION=2
+LESSON_RENDER_VERSION=3
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -54,7 +54,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     used={l.get('asset_id') for l in plan['lessons'] if l.get('asset_id')}
     hashes={key:hashlib.sha256((folder/'assets'/asset['file']).read_bytes()).hexdigest() for key,asset in project.get('assets',{}).items() if key in used}
     theme=signature();focus=speaker_focus(project,w,h)
-    identity={'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file')}
+    identity={'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
     code=digest(identity);render_dir=folder/'renders'/code;render_dir.mkdir(parents=True,exist_ok=True)
     result=render_dir/('preview.mp4' if preview else 'final.mp4');manifest=render_dir/'manifest.json'
     if result.exists() and manifest.exists():return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
@@ -75,7 +75,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
         page_paths[lesson['id']]=path
     sx,sy,cw,ch=g['speaker'];mask_path=tile_dir/f'mask-{cw}-{ch}-{g["radius"]}.png'
     if not mask_path.exists():rounded_mask((cw,ch),g['radius']).save(mask_path)
-    source=folder/project['source_file'];count=math.ceil(duration/20);chunks=[]
+    source=folder/project.get('render_source_file',project['source_file']);count=math.ceil(duration/20);chunks=[]
     for index in range(count):
         context.progress((78 if context.kind in ['pipeline','revise','reframe'] else 2)+(18 if context.kind in ['pipeline','revise','reframe'] else 90)*index/count,f"{'Dựng khung bài học' if preview else 'Xuất khung bài học'} · đoạn {index+1}/{count}")
         context.check();start=index*20;end=min(duration,start+20);length=end-start
@@ -85,7 +85,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
         for span in spans:
             a,b=max(start,span['output_start']),min(end,span['output_end'])
             if b>a+.001:pieces.append({'start':span['start']+a-span['output_start'],'duration':b-a})
-        chunk_key=digest({'v':LESSON_RENDER_VERSION,'renderer':RENDER_VERSION,'theme':theme,'size':[w,h],'pieces':pieces,'lessons':local_lessons,'captions':local_captions,'assets':hashes,'focus':focus,'start':start})
+        chunk_key=digest({'v':LESSON_RENDER_VERSION,'renderer':RENDER_VERSION,'theme':theme,'size':[w,h],'pieces':pieces,'lessons':local_lessons,'captions':local_captions,'assets':hashes,'focus':focus,'start':start,'matting':identity['matting']})
         cache=folder/'render-cache'/chunk_key;cache.mkdir(parents=True,exist_ok=True)
         chunk=cache/'chunk.mkv';chunks.append(chunk)
         if chunk.exists() and (cache/'complete.json').exists():continue

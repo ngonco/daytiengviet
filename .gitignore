@@ -20,3 +20,7 @@ OUTPUT/
 *.wav
 *.mp3
 *.zip
+*.torchscript
+*.pth
+*.onnx
+*.npz

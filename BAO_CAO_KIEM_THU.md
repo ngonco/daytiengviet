@@ -1,5 +1,38 @@
 # Bàn giao v1.1 — khung Vietnamese with Vinh
 
+## Xóa phông RVM — bản v1.2, 30/10/2026
+
+Đã cài môi trường CUDA riêng tại `data/runtime/matting`, PyTorch 2.8.0+cu128, RTX 3060 Laptop 6 GB / driver 576.52. Torch 2.8.0+cpu của môi trường cũ giữ nguyên. Mô hình RVM MobileNetV3 official v1.0.0 FP16/FP32 được kiểm tra SHA-256 trước dùng; GPL-3.0 và ghi công đã lưu trong assets/licenses.
+
+Đã tạo dự án thử riêng **Xóa phông · Duyệt chất lượng** (`e623b7fcd42c4415`) từ dữ liệu bài học đã lưu, không gọi thêm Groq/Vilao/Pexels. Hai dự án cũ và dự án khung bài học trước đó giữ nguyên dữ liệu/phiên bản. Dự án mới mặc định bật; dự án cũ thiếu cấu hình luôn tắt cho tới khi người dùng bật.
+
+### Số đo thật trên toàn mẫu 59,933 giây
+
+- 720×1290, đủ **1.798 khung hình ở 30 fps**, mạng nội bộ tối đa cạnh 512, FP16, nhóm 4 sau khung khởi tạo. Không bỏ khung để tăng tốc.
+- Lượt tối ưu cuối: **263,55 giây xử lý**, khoảng **6,82 hình/giây** toàn luồng; thời gian tính mô hình trong đó **56,37 giây**. Nạp mô hình từ đĩa riêng **3,04 giây**; lần đầu trước đó có số đo 8,16 giây do khởi tạo lạnh. Thời gian xử lý không bao gồm xuất khung bài học. Chưa đo tốc độ bài dài một giờ.
+- Bộ nhớ Torch cấp phát đỉnh **174,96 MiB**, pool giữ tối đa **284 MiB**. Lấy mẫu nvidia-smi mỗi giây trong phần còn lại của toàn lượt xử lý: tổng GPU đỉnh **3.426 MiB**, gồm desktop và app khác, không phải toàn bộ của RVM. Mẫu bắt đầu ở 3.307 MiB; không suy diễn chênh lệch này thành phép đo bộ nhớ từng tiến trình.
+- Tải môi trường CUDA khoảng 3,46 GB và mô hình khoảng 23 MB là bước cài riêng. Không ghi được thời gian tải mạng ban đầu, nên không gộp hoặc bịa số đó thành thời gian xử lý video. Báo cáo nạp mô hình bên trên là nạp từ đĩa vào bộ xử lý.
+- NVENC lưu màu người 4:4:4 QP16 và bản ghép QP18; alpha xám FFV1 không mất dữ liệu. Luồng Windows dùng bộ đệm 1 MB cố định, giới hạn luồng lọc. CPU encoding có thể dùng nếu NVENC không sẵn sàng; không chuyển suy luận GPU sang CPU ngầm.
+
+**38 kiểm thử tự động đều qua; npm run build thành công.** Có kiểm thử truyền đủ byte qua luồng video, tương thích cũ, nét sửa, OOM, mặt nạ, ranh giới đoạn và ZIP.
+
+### Hành vi đã kiểm tra
+
+- Hủy tác vụ thật sau đoạn 20 giây hoàn tất; SHA-256 mặt nạ đoạn đầu không đổi. Chạy tiếp khôi phục 600 hình và trạng thái mô hình, không bắt đầu lại từ đầu. Lượt tối ưu cuối chạy đủ nguồn từ đầu để đo lại. Kiểm thử mô phỏng OOM xác minh giảm nhóm 4 xuống từng hình mà không đặt lại trạng thái.
+- Đổi 9:16 / 16:9 dùng lại cùng mã mặt nạ; xuất 1080×1920 và 1920×1080 với tiếng stereo. Đã đọc hết hai tệp bằng FFmpeg.
+- Cắt 19,8–20,2 giây rồi khôi phục không đổi bộ nhớ đệm xóa phông. PCM của bản ghép trước dựng giống hệt nguồn. Đối chiếu tiếng bản dựng sau cắt: tương quan **0,9914**, sai lệch **5 ms**, nằm trong một khung hình.
+- Clip riêng 1,3 giây chạy CUDA thật với cọ bỏ: alpha vùng đánh dấu bằng 0, không có cảnh báo mất theo dõi trong clip. Bản mẫu sạch để duyệt không chứa nét thử này.
+- Cọ giữ/bỏ, theo dõi tiến về trước, ngừng khi mất độ tin cậy; lưu/khôi phục trạng thái theo dõi qua ranh giới 20 giây. Kiểm thử cấu hình/nét sửa/khóa phiên bản và ZIP xác minh chỉ mang cấu hình, không mang cache/mô hình.
+- Đã phát hiện và sửa trường hợp ảnh so sánh nền trống tại cuối đoạn do H.264/FFV1 khác đơn vị thời gian. API hiện lấy chính xác số khung hình; có kiểm thử hồi quy tại 19,9667 / 20,0333 giây và cuối đoạn.
+- Kiểm tra tóc, tai, cổ áo, vai, bàn tay và khoảng trống cánh tay trên nền kem/đen/trắng; clip trước/sau nằm ngay trong app. Không xác nhận tương đương CapCut trước khi người dùng xem và duyệt.
+
+**Trạng thái chất lượng: chờ người dùng duyệt clip thực tế.** Viền/cọ thay đổi hiện tạo bộ nhớ đệm mới và chạy lại xóa phông; đổi chữ/ảnh/tỷ lệ/cắt dùng lại kết quả. Nét sửa theo dõi từ mốc đánh dấu tiến về trước, không tự sửa ngược thời gian.
+
+Chứng cứ tại `OUTPUT/matting/`: acceptance.json, gpu-memory.json, cuts-verification.json, kiem_tra_vien.jpg, hai MP4 và ZIP dự án. Đây là dữ liệu riêng đã loại khỏi Git.
+
+---
+
+
 Ngày **30/10/2026**, múi giờ Việt Nam.
 
 - **28 kiểm thử tự động đều qua**; `npm run build` thành công. Các kiểm thử mới gồm phủ kín mục bài học, giữ nội dung qua mốc 20/120 giây và khi cắt lời nói, khóa chính xác nội dung/ranh giới, tái sử dụng ảnh, từ chối chữ quá dài, tương thích cũ và thử lại chuyển khung không gọi AI thêm.

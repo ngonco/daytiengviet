@@ -227,7 +227,8 @@ def render(project, plan, transcript, context, preview=True):
     if duration<.1:
         raise ValueError('Không có đoạn giữ lại để dựng')
     # Every render has an immutable identity. A failed new render never overwrites a good one.
-    identity={'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file')}
+    matting_code=project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None
+    identity={'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
     digest=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:18]
     render_dir=folder/'renders'/digest
     render_dir.mkdir(parents=True,exist_ok=True)
@@ -235,7 +236,7 @@ def render(project, plan, transcript, context, preview=True):
     manifest=render_dir/'manifest.json'
     if manifest.exists() and result.exists():
         return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
-    source=folder/project['source_file']
+    source=folder/project.get('render_source_file',project['source_file'])
     chunk_size=20
     count=math.ceil(duration/chunk_size)
     mapped_visuals=[{**v,'output_start':a,'output_end':b} for v in plan['visuals'] if v['enabled'] for a,b in map_interval(v['start'],v['end'],spans)]
@@ -253,7 +254,7 @@ def render(project, plan, transcript, context, preview=True):
             a,b=max(start,span['output_start']),min(end,span['output_end'])
             if b>a+.001:
                 pieces.append({'start':span['start']+a-span['output_start'],'duration':b-a})
-        chunk_hash=hashlib.sha256(json.dumps({'v':RENDER_VERSION,'size':[w,h],'pieces':pieces,'captions':local_captions,'visuals':local_visuals,'options':project['options'],'start':start},sort_keys=True).encode()).hexdigest()[:24]
+        chunk_hash=hashlib.sha256(json.dumps({'v':RENDER_VERSION,'size':[w,h],'pieces':pieces,'captions':local_captions,'visuals':local_visuals,'options':project['options'],'start':start,'matting':matting_code},sort_keys=True).encode()).hexdigest()[:24]
         cache_dir=folder/'render-cache'/chunk_hash
         cache_dir.mkdir(parents=True,exist_ok=True)
         chunk=cache_dir/'chunk.mkv'

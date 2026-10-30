@@ -4,6 +4,14 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Xóa phông tự động (v1.2)
+
+Dự án mới tự bật xóa phông; dự án cũ giữ nguyên và có công tắc bật riêng. Người nói giữ trong ô hiện tại, nền đổi sang kem. Tối ưu một người đứng nói, camera cố định, chuyển động nhẹ.
+
+Chạy **CAI_DAT_XOA_PHONG.cmd** để cài bộ GPU riêng. Có xem clip trước/sau, kiểm tra nền kem/đen/trắng, co/nới/làm mềm viền và cọ giữ/bỏ theo thời gian nguồn. Đổi khung dọc/ngang hoặc sửa chữ/ảnh dùng lại kết quả. Hủy và thử lại tiếp tục từ đoạn 20 giây đã hoàn tất.
+
+Xem **HUONG_DAN_GPU.md** để cài, sửa vùng và chẩn đoán. Chất lượng mong muốn lấy CapCut làm mốc; cần người dùng duyệt clip thực tế trước khi xác nhận đạt.
+
 ## Khung bài học — Vietnamese with Vinh (v1.1)
 
 Dự án mới dùng khung kem/xanh đậm với tên kênh nhỏ **Vietnamese with Vinh**. Video dọc có người nói phía trên khoảng 30% chiều cao; video ngang có người nói bên trái khoảng 1/3 chiều rộng. Từ/câu, nghĩa và một ảnh Pexels giữ nguyên suốt từng mục bài học, kể cả lúc đọc mẫu và chờ người học nhắc lại. Phụ đề Việt–Anh thay đổi trong ô người nói.

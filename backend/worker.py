@@ -7,6 +7,23 @@ from .providers import transcribe, analyze, fetch_assets
 from .render import render
 from .lessons import analyze_lessons,fetch_lesson_assets
 
+def prepared_render(project,plan,transcript,context,preview):
+    from .matting import ensure_matting
+    result=ensure_matting(project,context)
+    if result:
+        store.update(project['id'],matting=result)
+        # Only this rendering copy uses the composition; the project still owns the original source.
+        project={**project,'render_source_file':result['file'],'matting':result}
+        class RenderProgress:
+            def __init__(self,original):self.original=original
+            def __getattr__(self,name):return getattr(self.original,name)
+            def progress(self,value,message):
+                low=78 if context.kind in ['pipeline','revise','reframe'] else 0
+                base=store.job_read(context.job_id)['progress']
+                self.original.progress(max(base,88+(value-low)*11/(100-low)) if low else max(base,56+value*.43),message)
+        return render(project,plan,transcript,RenderProgress(context),preview)
+    return render(project,plan,transcript,context,preview)
+
 class Context:
     def __init__(self, job):
         self.job_id=job['id']
@@ -59,7 +76,7 @@ def execute(job):
             project=store.update(project['id'],plan=plan,options=project['options'],assets=assets,warnings=warnings+photo_warnings,vision_supported=vision,revision=project['revision']+1)
         else:
             plan=project['plan']
-        result=render(project,plan,transcript,context,True)
+        result=prepared_render(project,plan,transcript,context,True)
         store.update(project['id'],preview=result,status='ready')
     elif job['kind'] in ['preview','export']:
         if not project.get('plan'):
@@ -68,7 +85,7 @@ def execute(job):
         frames=extract_frames(context.folder/project['source_file'],context.folder,project['metadata'],context)
         project=store.update(project['id'],frames=frames)
         preview=job['kind']=='preview'
-        result=render(project,project['plan'],project.get('transcript',{}),context,preview)
+        result=prepared_render(project,project['plan'],project.get('transcript',{}),context,preview)
         store.update(project['id'],**{'preview' if preview else 'export':result,'status':'ready'})
     else:
         raise ValueError('Tác vụ không hợp lệ')
