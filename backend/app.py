@@ -56,13 +56,17 @@ class PhotoBody(BaseModel):
 class RestoreBody(BaseModel):
     revision: int=Field(ge=1)
 
+class PhotoPoolBody(BaseModel):
+    revision: int=Field(ge=1)
+    refresh: bool=False
+
 @asynccontextmanager
 async def lifespan(app):
     store.init()
     worker.start()
     yield
 
-app=FastAPI(title='VietCut Studio',version='1.2.0',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.3.0',lifespan=lifespan)
 
 @app.middleware('http')
 async def local_access(request:Request,call_next):
@@ -124,7 +128,7 @@ def create(source:Path,title,options,project_id=None,move=False):
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.2.0'}
+    return {'ok':True,'app':'vietcut','version':'1.3.0'}
 
 @app.get('/api/matting/status')
 def matting_status():
@@ -200,6 +204,37 @@ def cancel(job_id:str):
         store.job_update(job_id,status='cancelled' if job['status']=='queued' else 'cancelling',message='Đang dừng xử lý')
     return store.job_read(job_id)
 
+@app.post('/api/jobs/{job_id}/retry')
+def retry_photo_job(job_id:str):
+    job=store.job_read(job_id)
+    if not job or job['kind']!='lesson_photos' or job['status'] not in ['failed','cancelled']:
+        raise ValueError('Chỉ thử lại tác vụ bộ ảnh đã dừng hoặc bị lỗi.')
+    return store.job_create(job['project_id'],job['kind'],json.loads(job['request']))
+
+@app.post('/api/projects/{project_id}/lessons/{lesson_id}/photo-candidates')
+def prepare_photos(project_id:str,lesson_id:str,body:PhotoPoolBody):
+    with store.LOCK:
+        idle(project_id);project=store.read(project_id)
+        if project['revision']!=body.revision:raise HTTPException(409,'Dự án đã đổi. Hãy tải lại trước khi chuẩn bị ảnh.')
+        if project['options'].get('layout_mode')!='lesson' or not project.get('plan'):
+            raise ValueError('Chức năng này dùng trong khung bài học.')
+        if not any(l['id']==lesson_id for l in project['plan'].get('lessons',[])):
+            raise HTTPException(404,'Không tìm thấy mục bài học.')
+        return store.job_create(project_id,'lesson_photos',{'lesson_id':lesson_id,'generation':store.uid() if body.refresh else 'initial','refresh':body.refresh})
+
+@app.get('/api/projects/{project_id}/photo-layout')
+def photo_layout(project_id:str,asset_id:str,ratio:Literal['9:16','16:9','original']='9:16',zoom:float=1):
+    from .photo_layout import layout
+    from .templates import geometry
+    from .render import dimensions
+    project=store.read(project_id);asset=project.get('assets',{}).get(asset_id)
+    if not asset or Path(asset['file']).name!=asset['file']:raise HTTPException(404,'Không tìm thấy ảnh.')
+    w,h=dimensions({**project,'options':{**project['options'],'ratio':ratio}},False)
+    g=geometry(w,h);_,_,pw,ph=g['photo']
+    with Image.open(store.folder(project_id)/'assets'/asset['file']) as image:
+        image=ImageOps.exif_transpose(image)
+        return {**layout(*image.size,pw,ph,zoom),'crop_key':'9:16' if g['portrait'] else '16:9'}
+
 @app.get('/api/projects/{project_id}/events')
 async def events(project_id:str,request:Request):
     store.read(project_id)
@@ -228,6 +263,8 @@ def save_plan(project_id:str,body:SavePlan):
         for visual in [*plan['visuals'],*plan['lessons']]:
             if visual.get('asset_id') and visual['asset_id'] not in project['assets']:
                 raise ValueError('Ảnh chưa được tải vào dự án.')
+            if any(i not in project['assets'] for i in visual.get('photo_candidates',[])):
+                raise ValueError('Bộ ảnh có ảnh chưa được tải vào dự án.')
         worker.version(project)
         options=body.options.model_dump()
         validate_duration(options,project['metadata']['duration'])
@@ -277,6 +314,8 @@ def restore(project_id:str,body:RestoreBody):
         old=json.loads(path.read_text(encoding='utf-8'))
         worker.version(project)
         restored=validate_plan(old['plan'],project['metadata']['duration'])
+        if any(i not in project.get('assets',{}) for l in restored.get('lessons',[]) for i in l.get('photo_candidates',[])):
+            raise ValueError('Phiên bản này tham chiếu bộ ảnh chưa có trong dự án.')
         restored_options=Options.model_validate(old['options']).model_dump()
         validate_duration(restored_options,project['metadata']['duration'])
         store.update(project_id,plan=restored,options=restored_options,revision=project['revision']+1)
@@ -287,14 +326,14 @@ def restore(project_id:str,body:RestoreBody):
 def photos(query:str):
     if not query.strip() or len(query)>200:
         raise ValueError('Từ khóa cần từ 1 đến 200 ký tự.')
-    return search_photos(query)
+    return search_photos(query,per_page=10)
 
 @app.post('/api/projects/{project_id}/photos')
 def choose_photo(project_id:str,body:PhotoBody):
     with store.LOCK:
         idle(project_id)
         project=store.read(project_id)
-        candidates=search_photos(body.query)
+        candidates=search_photos(body.query,per_page=10)
         photo=next((p for p in candidates if p['id']==body.photo_id),None)
         if not photo:
             raise ValueError('Ảnh không còn trong kết quả. Hãy tìm lại.')
@@ -410,7 +449,7 @@ def download(project_id:str,kind:Literal['video','vi','en','project','credits'])
                 archive.write(transcript_path,'transcript.json')
             for directory in ['assets','versions','frames']:
                 for p in (folder/directory).glob('*'):
-                    if p.is_file():
+                    if p.is_file() and p.suffix.lower() in ['.jpg','.jpeg','.png','.json']:
                         archive.write(p,p.relative_to(folder))
             if project.get('music_file'):
                 archive.write(folder/project['music_file'],project['music_file'])
@@ -456,6 +495,10 @@ def import_project(file:UploadFile=File(...)):
         for asset in project.get('assets',{}).values():
             if Path(asset['file']).name!=asset['file']:
                 raise ValueError('Đường dẫn ảnh không hợp lệ.')
+        if project.get('plan'):
+            for lesson in project['plan'].get('lessons',[]):
+                if any(i not in project.get('assets',{}) for i in lesson.get('photo_candidates',[])):
+                    raise ValueError('Bộ ảnh trong ZIP thiếu dữ liệu ảnh.')
         if project.get('music_file') and Path(project['music_file']).name!=project['music_file']:
             raise ValueError('Đường dẫn nhạc không hợp lệ.')
         store.save(project)

@@ -44,6 +44,12 @@ class LessonChunk(BaseModel):
     vi: str = Field(min_length=1, max_length=100)
     en: str = Field(min_length=1, max_length=140)
 
+class PhotoCrop(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    x: float = Field(default=.5, ge=0, le=1)
+    y: float = Field(default=.5, ge=0, le=1)
+    zoom: float = Field(default=1, ge=1, le=3)
+
 class Lesson(Timed):
     model_config = ConfigDict(extra='ignore',allow_inf_nan=False,str_strip_whitespace=True)
     vi: str = Field(min_length=1, max_length=800)
@@ -52,6 +58,14 @@ class Lesson(Timed):
     photo_query: str = Field(default='', max_length=200)
     asset_id: str | None = None
     locked: bool = False
+    photo_candidates: list[str] = Field(default_factory=list, max_length=10)
+    photo_crops: dict[Literal['9:16','16:9'],PhotoCrop] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def distinct_photos(self):
+        if len(set(self.photo_candidates)) != len(self.photo_candidates):
+            raise ValueError('Bộ ảnh không được chứa ảnh trùng.')
+        return self
 
 class Plan(BaseModel):
     model_config = ConfigDict(extra='ignore')

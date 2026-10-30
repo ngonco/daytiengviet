@@ -1,4 +1,29 @@
-# Bàn giao v1.1 — khung Vietnamese with Vinh
+# Báo cáo kiểm thử — Vietnamese with Vinh
+
+## Khung không blur, chỉnh cắt ảnh và bộ 10 ảnh — v1.3
+
+**51 kiểm thử tự động đều qua; `npm run build` thành công.** Các kiểm thử có sẵn về STT/AI, khóa bài, cắt/khôi phục, phụ đề, xóa phông và legacy tiếp tục qua.
+
+- Ô người nói dùng một video trên nền kem phẳng, giữ phép tính kích thước/vị trí mặt và viền bo góc. Đã kiểm thử bằng video màu xanh rằng khoảng hai bên là kem, không phải hình mở rộng hoặc blur.
+- Ảnh minh họa phủ kín vùng ảnh ở 9:16 và 16:9, không dùng blur, giữ tỷ lệ. Kiểm tra ảnh dọc/ngang/vuông, zoom 1–3×, các biên vị trí và ảnh hai màu để xác minh phần được cắt trong khung. Bản dựng dùng cùng phép tính với API hình học của giao diện.
+- Lưu hai cấu hình cắt độc lập; chọn ảnh khác đặt lại cấu hình. Cấu hình và bộ ảnh được kiểm tra qua lưu, ZIP, nhập lại, lịch sử và khôi phục. Chọn ảnh tải sẵn được kiểm thử với Pexels/Vilao cố tình không khả dụng: vẫn lưu được, không gọi nhà cung cấp.
+- Bộ ảnh tải đủ mười ID khác nhau; kiểm thử loại trùng, tải thiếu, lỗi mạng, hủy sau ba ảnh rồi tiếp tục chỉ tải bảy ảnh còn lại. AI xếp hạng chỉ được chọn ID trong danh sách. Mục lặp dùng lại bộ ảnh; ảnh đang chọn/khóa và vị trí cắt không bị AI dựng lại ghi đè.
+- API chuẩn bị ảnh kiểm tra phiên bản, khóa khi dự án đang bận; thử lại tác vụ giữ cùng mã thế hệ bộ ảnh. Bộ mới loại bộ đang hiển thị, không thay ảnh đang chọn. Nếu không đủ ảnh, báo số thật; không nhân bản ảnh để đủ mười.
+
+### Thử nghiệm thật trên máy
+
+Dự án thử riêng **Khung sạch · 10 ảnh mỗi bài** (`88308cdfcbfe4f5d`), video nguồn 59,933 giây. Dùng Pexels và Vilao thật: chuẩn bị đủ 10 ảnh, sau đó tìm đủ bộ 10 ảnh mới không trùng bộ đầu, xác minh ảnh đang chọn được giữ. Không gọi lại Groq. Chọn ảnh từ bộ đã tải và lưu cấu hình cắt dọc/ngang qua API.
+
+Đã xuất **1080×1920** và **1920×1080**, âm thanh stereo, đọc toàn bộ cả hai MP4 bằng FFmpeg. Ảnh trích kiểm tra tại 2 / 12 / 30 / 59 giây; kiểm tra trực quan không còn nền blur hai bên người nói, ảnh phủ kín vùng minh họa. Khung/tóc/miệng và phụ đề tiếp tục dùng vị trí cũ. Viền mảnh được giữ theo lựa chọn người dùng.
+
+Cả hai tỷ lệ dùng lại mã xóa phông `8eeb6d7a5b6c0ce6285645ba`; thời gian sửa tệp manifest không thay đổi, không chạy lại GPU matting. Bốn dự án có sẵn giữ nguyên dữ liệu và phiên bản. ZIP được đọc kiểm tra và đối chiếu mã băm ảnh: giữ ảnh dự phòng, ảnh đang dùng, cách cắt và lịch sử; không chứa cache xóa phông hoặc key.
+
+**Giới hạn kiểm tra giao diện:** trình duyệt tự động đang tắt trong Work settings. Bản này được kiểm tra qua build TypeScript, API thật, kiểm thử và ảnh/video xuất; chưa thao tác kéo ảnh trực tiếp trên trình duyệt ở lượt bàn giao này. Không ghi nhận là đã hoàn tất kiểm thử thao tác chuột.
+
+Chứng cứ riêng tại `OUTPUT/photo_frames/`: `acceptance.json`, hai MP4, ZIP, ảnh trích, `bo_10_anh.jpg` và `hai_khung_khong_blur.jpg`. Toàn bộ nằm ngoài Git.
+
+---
+
 
 ## Xóa phông RVM — bản v1.2, 30/10/2026
 

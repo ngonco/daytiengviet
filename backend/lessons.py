@@ -90,28 +90,15 @@ Trả JSON {"lessons":[{"start":0,"end":120,"vi":"từ hoặc câu tiếng Việ
                 messages.append({'role':'user','content':'Sửa JSON đầy đủ: '+str(exc)[:300]})
                 part=None
     plan={**base_plan,'schema_version':2,'visuals':[],'lessons':normalize_lessons(proposals,duration,locked)}
-    # Reuse the illustration for the same learning target, including a later recurrence.
-    previous_assets={lesson_key(item['vi']):item.get('asset_id') for item in old_plan.get('lessons',[]) if item.get('asset_id')}
+    # Preserve saved user illustrations/crops/pools for the same semantic target.
+    previous={lesson_key(item['vi']):item for item in old_plan.get('lessons',[]) if item.get('asset_id')}
     for item in plan['lessons']:
-        item['asset_id']=item.get('asset_id') or previous_assets.get(lesson_key(item['vi']))
+        old=previous.get(lesson_key(item['vi']))
+        if old:
+            for field in ['asset_id','photo_crops','photo_candidates']:
+                if field in old:item[field]=copy.deepcopy(old[field])
     return validate_plan(plan,duration)
 
 def fetch_lesson_assets(project,plan,context,vision):
-    from .providers import fetch_assets
-    assets=dict(project.get('assets',{}));warnings=[];targets={}
-    for index,item in enumerate(plan['lessons']):
-        key=lesson_key(item['vi'])
-        if item.get('asset_id') in assets:
-            targets[key]=item['asset_id'];continue
-        if key in targets:
-            item['asset_id']=targets[key];continue
-        if not item['photo_query'].strip():
-            warnings.append('Chưa có từ khóa ảnh cho mục: '+item['vi']);continue
-        visual={'id':item['id'],'start':item['start'],'end':item['end'],'kind':'photo','layout':'card','text':item['vi'],'translation':item['en'],'query':item['photo_query'],'asset_id':None,'enabled':True}
-        proxy={**project,'assets':assets}
-        assets,notes=fetch_assets(proxy,{'visuals':[visual]},context,vision)
-        item['asset_id']=visual.get('asset_id')
-        if item['asset_id']:
-            targets[key]=item['asset_id']
-        warnings.extend(notes)
-    return assets,warnings
+    from .photo_pools import prepare_all
+    return prepare_all({**project,'vision_supported':vision},plan,context)

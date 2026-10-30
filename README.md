@@ -4,6 +4,14 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Khung không blur và 10 ảnh mỗi mục (v1.3)
+
+Ô người nói giữ nguyên kích thước, nền kem phẳng và viền bo góc mảnh; không còn hình mờ mở rộng hai bên. Ảnh minh họa phủ kín ô ở cả 9:16 và 16:9, giữ tỷ lệ và cắt mép dư. Trong tab **Bài học**, kéo ảnh hoặc dùng thanh vị trí/phóng 1–3×; **Đặt lại** đưa về giữa. Mỗi tỷ lệ lưu cách cắt riêng. Đổi sang ảnh khác đặt lại cách cắt; bấm **Lưu & dựng lại** để áp dụng.
+
+Dự án mới chuẩn bị **10 ảnh tải sẵn cho mỗi mục**, AI chọn mặc định. Bấm ảnh trong lưới để đổi, không cần mạng. Dự án đã có dùng nút **Chuẩn bị 10 ảnh**; không tự tìm ảnh khi mở dự án. Có **Bổ sung đủ 10 ảnh**, **Tìm bộ 10 ảnh khác**, từ khóa và tải ảnh riêng. Lưu chỉnh sửa trước khi chuẩn bị bộ ảnh. Tải thiếu sẽ báo số thực có, không lặp ảnh để đủ mười. Hủy/thử lại giữ ảnh đã tải. ZIP giữ bộ ảnh và cách cắt; ảnh và video riêng không đưa lên GitHub.
+
+Bản sửa được dùng khi dựng lại dự án có khung bài học; bản đã xuất được giữ nguyên. Dự án legacy không tự đổi cách dựng. Thay chữ/ảnh/cắt/tỷ lệ tiếp tục dùng lại xóa phông đã có.
+
 ## Xóa phông tự động (v1.2)
 
 Dự án mới tự bật xóa phông; dự án cũ giữ nguyên và có công tắc bật riêng. Người nói giữ trong ô hiện tại, nền đổi sang kem. Tối ưu một người đứng nói, camera cố định, chuyển động nhẹ.

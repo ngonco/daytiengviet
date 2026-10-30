@@ -5,10 +5,11 @@ import math
 from functools import lru_cache
 from pathlib import Path
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+from .photo_layout import cover
 from .config import ROOT
 
-TEMPLATE_VERSION=1
+TEMPLATE_VERSION=2
 FONT_DIR=ROOT/'assets/fonts'
 
 def brand():
@@ -99,7 +100,7 @@ def make_frame(project,lesson,folder,w,h,target):
     x,y,sw,sh=g['speaker']
     pad=max(2,round(5*s))
     draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g['radius']+pad,fill='#eadfce')
-    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g['radius'],fill='#d8cbbb')
+    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g['radius'],fill=b['paper'])
     cx,cy,cw,ch=g['content']
     draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill='#fffaf0')
     inset=round(30*s);iw=cw-2*inset
@@ -130,9 +131,8 @@ def make_frame(project,lesson,folder,w,h,target):
     if asset:
         with Image.open(folder/'assets'/asset['file']) as raw:
             raw=ImageOps.exif_transpose(raw).convert('RGB')
-            photo=ImageOps.fit(raw,(pw,ph)).filter(ImageFilter.GaussianBlur(max(6,round(20*s))))
-            front=ImageOps.contain(raw,(pw,ph),method=Image.Resampling.LANCZOS)
-            photo.paste(front,((pw-front.width)//2,(ph-front.height)//2))
+            ratio='9:16' if g['portrait'] else '16:9'
+            photo=cover(raw,(pw,ph),lesson.get('photo_crops',{}).get(ratio))
         image.paste(photo,(px,py),mask)
     else:
         fill=Image.new('RGB',(pw,ph),'#e5ecdf');pd=ImageDraw.Draw(fill)

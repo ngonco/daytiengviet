@@ -233,11 +233,11 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
     plan['cuts'] = [c for c in plan['cuts'] if c['end'] - c['start'] >= 0.12]
     return validate_plan(plan, duration), warnings, vision
 
-def search_photos(query, context=None, portrait=False):
+def search_photos(query, context=None, portrait=False, per_page=6, page=1):
     key = settings().get('PEXELS_API_KEY')
     if not key:
         raise ProviderError('Pexels', detail='Chưa điền PEXELS_API_KEY trong .env.')
-    data = request('GET', 'https://api.pexels.com/v1/search', 'Pexels', context, headers={'Authorization': key}, params={'query': query, 'per_page': 6, 'size': 'large'}).json()
+    data = request('GET', 'https://api.pexels.com/v1/search', 'Pexels', context, headers={'Authorization': key}, params={'query': query, 'per_page': per_page, 'page':page, 'size': 'large'}).json()
     return [{'id': str(p['id']), 'width': p['width'], 'height': p['height'], 'alt': p.get('alt', ''), 'url': p['url'], 'photographer': p['photographer'], 'photographer_url': p['photographer_url'], 'preview': p['src']['medium'], 'download': p['src']['large2x']} for p in data.get('photos', [])]
 
 def download_photo(photo, folder, context=None):
@@ -245,6 +245,10 @@ def download_photo(photo, folder, context=None):
     assets = folder / 'assets'
     assets.mkdir(exist_ok=True)
     path = assets / (asset_id + '.jpg')
+    if path.exists():
+        try:
+            with Image.open(path) as im:im.verify()
+        except (OSError,ValueError):path.unlink()
     if not path.exists():
         response = request('GET', photo['download'], 'Pexels ảnh', context)
         if len(response.content) > 30_000_000:
@@ -253,7 +257,10 @@ def download_photo(photo, folder, context=None):
         temp.write_bytes(response.content)
         try:
             with Image.open(temp) as im:
-                im.convert('RGB').save(path, quality=94)
+                from PIL import ImageOps
+                ready=path.with_suffix('.ready')
+                ImageOps.exif_transpose(im).convert('RGB').save(ready,format='JPEG',quality=94)
+                ready.replace(path)
         finally:
             temp.unlink(missing_ok=True)
     return {**photo, 'id': asset_id, 'file': path.name, 'provider': 'pexels'}

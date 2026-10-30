@@ -52,7 +52,22 @@ def execute(job):
     project=store.read(job['project_id'])
     request=json.loads(job['request'])
     store.update(project['id'],status='working')
-    if job['kind'] in ['pipeline','revise','reframe']:
+    if job['kind']=='lesson_photos':
+        from .photo_pools import prepare_pool,apply_pool
+        import copy
+        plan=copy.deepcopy(project['plan'])
+        lesson=next((l for l in plan['lessons'] if l['id']==request['lesson_id']),None)
+        if not lesson:raise ValueError('Mục bài học không còn tồn tại.')
+        assets,ids,notes=prepare_pool(project,lesson,context,request['generation'],request['refresh'])
+        apply_pool(lesson,ids,assets)
+        context.check()
+        if plan!=project['plan']:
+            version(project)
+            project=store.update(project['id'],plan=plan,assets=assets,revision=project['revision']+1,warnings=notes)
+        else:project=store.update(project['id'],assets=assets,warnings=notes)
+        result=prepared_render(project,plan,project.get('transcript',{}),context,True)
+        store.update(project['id'],preview=result,status='ready')
+    elif job['kind'] in ['pipeline','revise','reframe']:
         context.progress(3,'Chuẩn bị âm thanh và khung hình')
         frames=extract_frames(context.folder/project['source_file'],context.folder,project['metadata'],context)
         project=store.update(project['id'],frames=frames)

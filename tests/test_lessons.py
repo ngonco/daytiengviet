@@ -11,7 +11,7 @@ from backend.templates import geometry,make_frame,fit_text
 from backend.app import Options
 
 def lesson(start=0,end=180,vi='Xin chào',id='l1',**extra):
-    return {'id':id,'start':start,'end':end,'vi':vi,'en':'Hello','chunks':[],'photo_query':'people greeting Vietnam','asset_id':None,'locked':False,**extra}
+    return {'id':id,'start':start,'end':end,'vi':vi,'en':'Hello','chunks':[],'photo_query':'people greeting Vietnam','asset_id':None,'locked':False,'photo_candidates':[],'photo_crops':{},**extra}
 
 class Context:
     job_id='test-lessons'
@@ -51,10 +51,12 @@ class LessonTests(unittest.TestCase):
             self.assertIn('Xin chào',packet)
     def test_repeat_target_reuses_image(self):
         with TemporaryDirectory() as tmp:
-            plan={'lessons':[lesson(0,10,asset_id='photo'),lesson(10,20,id='l2')]}
-            with patch('backend.providers.fetch_assets',side_effect=AssertionError('Must reuse image')):
-                assets,warnings=fetch_lesson_assets({'assets':{'photo':{'file':'x.jpg'}}},plan,Context(Path(tmp)),False)
-            self.assertEqual(plan['lessons'][1]['asset_id'],'photo')
+            folder=Path(tmp);(folder/'assets').mkdir();known={str(i):{'file':f'{i}.jpg'} for i in range(10)}
+            for asset in known.values():(folder/'assets'/asset['file']).write_bytes(b'cached')
+            plan={'lessons':[lesson(0,10,asset_id='0',photo_candidates=list(known)),lesson(10,20,id='l2')]}
+            with patch('backend.providers.search_photos',side_effect=AssertionError('Must reuse saved set')):
+                assets,warnings=fetch_lesson_assets({'assets':known},plan,Context(folder),False)
+            self.assertEqual(plan['lessons'][1]['asset_id'],'0')
     def test_template_and_subtitle_regions_in_both_ratios(self):
         with TemporaryDirectory() as tmp:
             folder=Path(tmp)
@@ -75,6 +77,15 @@ class LessonTests(unittest.TestCase):
             with patch('backend.providers.chat',side_effect=AssertionError('Locked lessons must be reused')):
                 result=analyze_lessons({'metadata':{'duration':180}},{'summary':'Bài học','cuts':[],'captions':[],'visuals':[]},{},Context(Path(tmp)),{'lessons':[saved]},'Giữ nội dung')
             self.assertEqual(result['lessons'][0],saved)
+    def test_ai_revision_preserves_selected_photo_pool_and_ratio_crops(self):
+        with TemporaryDirectory() as tmp:
+            saved=lesson(0,2,asset_id='user-choice',photo_candidates=['user-choice','alternative'],photo_crops={'9:16':{'x':.2,'y':.7,'zoom':1.5}})
+            proposal=lesson(0,2,asset_id='ai-choice')
+            base={'summary':'Chào hỏi','captions':[],'cuts':[],'visuals':[]}
+            with patch('backend.providers.chat',return_value=(json.dumps({'lessons':[proposal]}),{})):
+                result=analyze_lessons({'metadata':{'duration':2}},base,{'captions':[]},Context(Path(tmp)),{'lessons':[saved]},'Giữ bài học')
+            row=result['lessons'][0]
+            for key in ['asset_id','photo_candidates','photo_crops']:self.assertEqual(row[key],saved[key])
     def test_whitespace_lesson_text_is_rejected(self):
         with self.assertRaises(ValueError):validate_plan({'schema_version':2,'lessons':[lesson(0,180,vi='   ')]},180)
 

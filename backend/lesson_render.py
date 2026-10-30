@@ -7,7 +7,7 @@ from .media import ffmpeg
 from .store import atomic_json
 from .templates import geometry,signature,make_frame,rounded_mask,speaker_focus,font,fit_text
 
-LESSON_RENDER_VERSION=3
+LESSON_RENDER_VERSION=4
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -69,7 +69,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     tile_dir=folder/'lesson-tiles';tile_dir.mkdir(exist_ok=True)
     page_paths={}
     for lesson in lessons:
-        key=digest({'lesson':{k:lesson.get(k) for k in ['vi','en','chunks','asset_id']},'asset':hashes.get(lesson.get('asset_id')),'size':[w,h],'theme':theme})
+        key=digest({'lesson':{k:lesson.get(k) for k in ['vi','en','chunks','asset_id','photo_crops']},'asset':hashes.get(lesson.get('asset_id')),'size':[w,h],'theme':theme})
         path=tile_dir/(key+'.png')
         if not path.exists():make_frame(project,lesson,folder,w,h,path)
         page_paths[lesson['id']]=path
@@ -96,10 +96,9 @@ def render_lessons(project,plan,transcript,context,preview=True):
             filters.append(f'[{i}:a]atrim=duration={piece["duration"]},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.008,afade=t=out:st={max(0,piece["duration"]-.008)}:d=0.008[a{i}]')
         filters.append(''.join(f'[v{i}][a{i}]' for i in range(len(pieces)))+f'concat=n={len(pieces)}:v=1:a=1[raw][audio]')
         fx,fy,fw,fh=focus
-        bw=max(2,cw//6//2*2);bh=max(2,ch//6//2*2)
-        filters+=['[raw]split=2[bg][fg]',f'[bg]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},gblur=sigma=4,scale={cw}:{ch}[blur]',
-                  f"[fg]scale={fw}:{fh},format=rgba,crop={min(fw,cw)}:{min(fh,ch)}:x='min(max(iw*{fx}-ow*.5,0),iw-ow)':y='min(max(ih*{fy}-oh*.42,0),ih-oh)',pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=black@0[front]",
-                  '[blur][front]overlay=0:0,format=rgba[actor]']
+        from .templates import brand
+        cream=brand()['paper'].replace('#','0x')
+        filters.append(f"[raw]scale={fw}:{fh},format=rgba,crop={min(fw,cw)}:{min(fh,ch)}:x='min(max(iw*{fx}-ow*.5,0),iw-ow)':y='min(max(ih*{fy}-oh*.42,0),ih-oh)',pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color={cream}[actor]")
         next_input=len(pieces)
         page_labels=[]
         for j,lesson in enumerate(local_lessons):

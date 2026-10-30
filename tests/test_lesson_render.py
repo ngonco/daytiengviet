@@ -16,6 +16,19 @@ class Context:
     def progress(self,*args):pass
 
 class LessonRenderTests(unittest.TestCase):
+    def test_speaker_padding_is_flat_cream_not_a_second_video(self):
+        with TemporaryDirectory() as tmp:
+            folder=Path(tmp);ffmpeg(['-f','lavfi','-i','color=c=blue:size=180x320:rate=30','-f','lavfi','-i','sine=frequency=330:sample_rate=48000','-t','1','-c:v','libx264','-c:a','aac',folder/'source.mp4'])
+            p={'metadata':{'duration':1,'width':180,'height':320},'options':{'ratio':'9:16','layout_mode':'lesson','subtitles':'off','sfx':False},'source_file':'source.mp4','assets':{},'revision':1,'frames':[{'face':{'x':.3,'y':.15,'w':.4,'h':.65}}]}
+            plan={'schema_version':2,'lessons':[{'id':'l','start':0,'end':1,'vi':'Xin chào','en':'Hello','chunks':[]}],'captions':[],'cuts':[],'visuals':[]}
+            result=render(p,plan,{},Context(folder),True)
+            ffmpeg(['-ss',.3,'-i',folder/result['file'],'-frames:v',1,folder/'check.png'])
+            x,y,w,h=geometry(result['width'],result['height'])['speaker']
+            with Image.open(folder/'check.png') as image:
+                for xx in [x+12,x+w-12]:
+                    rgb=image.getpixel((xx,y+h//2))
+                    self.assertLess(max(abs(a-b) for a,b in zip(rgb,(251,245,233))),12)
+
     def test_static_content_across_20_second_chunks_with_cut_and_captions(self):
         with TemporaryDirectory() as tmp:
             folder=Path(tmp);(folder/'assets').mkdir()
