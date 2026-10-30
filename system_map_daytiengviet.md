@@ -166,3 +166,7 @@ Only code, blank configuration, documentation, licensed template/font assets and
 
 - backend/seo.py supplies safe ASCII download names with vietnamese-learn-bai-hoc and project lesson title for MP4, language-specific SRT and ZIP. Newly rendered MP4s embed lesson title, description, keywords in comment, author, education genre and Vietnamese language. Renderer v8 invalidates old output caches; title participates in output identity. Existing saved exports remain intact. Download controls appear above the editor grid.
 - Validation: npm run build and offline unittest suite (see delivery result).
+
+## Landscape thumbnails
+- GET /api/projects/{id}/thumbnail creates a read-only 1280x720 PNG using saved lessons, preferring a short illustrated target. backend/thumbnail.py shares brand/fonts with video: large Vietnamese, English meaning and illustration. No providers or project mutations. Export control beside video export requires saved lessons. Missing photos use a teaching card; overflow returns 422. CTR is a design goal, never guaranteed.
+- Validation: npm run build passed; Vietnamese PNG smoke check passed (1280x720); staged credential scan passed. Full offline suite launched; completion pending at delivery.

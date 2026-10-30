@@ -581,3 +581,14 @@ def import_project(file:UploadFile=File(...)):
 
 if (ROOT/'dist').exists():
     app.mount('/',StaticFiles(directory=ROOT/'dist',html=True),name='frontend')
+
+
+@app.get('/api/projects/{project_id}/thumbnail')
+def thumbnail(project_id: str):
+    from .thumbnail import render_thumbnail
+    project = store.read(project_id)
+    try:
+        content = render_thumbnail(project, store.folder(project_id))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, 'Thumbnail text or illustration is invalid.') from exc
+    return Response(content, media_type='image/png', headers={'Content-Disposition': 'attachment; filename="' + basename(project) + '-thumbnail.png"', 'Cache-Control': 'no-store'})
