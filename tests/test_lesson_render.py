@@ -34,5 +34,9 @@ class LessonRenderTests(unittest.TestCase):
                 diff=ImageChops.difference(a.crop((x+10,y+10,x+w-10,y+h-10)),b.crop((x+10,y+10,x+w-10,y+h-10)))
                 self.assertLess(sum(ImageStat.Stat(diff).mean)/3,2.5)
             self.assertEqual(result['layout_mode'],'lesson')
+            project['revision']=2
+            reused=render(project,plan,{},Context(folder),True)
+            self.assertEqual(reused['digest'],result['digest'])
+            self.assertEqual(reused['revision'],2)
 
 if __name__=='__main__':unittest.main()

@@ -57,7 +57,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     identity={'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file')}
     code=digest(identity);render_dir=folder/'renders'/code;render_dir.mkdir(parents=True,exist_ok=True)
     result=render_dir/('preview.mp4' if preview else 'final.mp4');manifest=render_dir/'manifest.json'
-    if result.exists() and manifest.exists():return json.loads(manifest.read_text(encoding='utf-8'))
+    if result.exists() and manifest.exists():return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
     validate_text_layout(project,plan)
     lessons=mapped_lessons(plan,spans)
     captions=[]

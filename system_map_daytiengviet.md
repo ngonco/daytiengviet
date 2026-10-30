@@ -76,6 +76,7 @@ Pipeline order: frame extraction → cached/new STT → original bilingual-capti
 - Images are contained over a blurred fill, preserving all subjects. No image creates a full-screen replacement of the frame. Missing images use a neutral teaching card and a warning; user can choose Pexels or their own image.
 - All source cuts remain inward-aligned to 30-fps boundaries. Intermediate chunks use PCM audio to avoid accumulating AAC delay. Final output is H.264 + AAC stereo.
 - Lesson cache identity includes the render version, lesson-render version, template/font/brand content signature, chosen image bytes, speaker focus, plan, options and music. A change to rendering behavior MUST bump its version. A cosmetic template change must invalidate the template signature/version.
+- On an identical-content cache hit, return the caller's current project revision in result metadata. Keep the immutable file/manifest content unchanged. Returning the original manifest revision falsely marks a correct reused preview as outdated after restoring/switching layouts.
 
 ## Where to change a feature
 

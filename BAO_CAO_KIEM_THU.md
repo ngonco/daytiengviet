@@ -6,6 +6,7 @@ Ngày **30/10/2026**, múi giờ Việt Nam.
 - Đã chạy thật Groq, Vilao và Pexels trên một dự án mẫu mới riêng. AI xác định một mục **Xin chào — Hello** giữ từ đầu đến cuối video, thay vì tạo mục từ các câu chỉ dẫn như “Repeat after me”.
 - Đã kiểm tra trực quan và xuất hai bản cuối: **1080×1920** và **1920×1080**, H.264, AAC stereo, **59,933 giây**. FFmpeg đọc hết cả hai tệp hình/tiếng không có lỗi. Khoảng trống quanh đầu được chỉnh, phụ đề nằm trong ô người nói; ảnh và nội dung chính đứng yên cả mục.
 - Đã thao tác giao diện thật: chọn mục, thêm/chia, gộp, xóa, sửa “Xin chào!” / “Hello!”, kiểm tra tự khóa và lưu/dựng lại. Dòng thời gian nối liền trở lại sau khi xóa/gộp.
+- Đã sửa và kiểm thử việc dùng lại bộ nhớ đệm: bản xem trước có nội dung giống phiên bản cũ được ghi nhận đúng phiên bản hiện tại, không báo nhầm “chưa cập nhật”.
 - ZIP v2 đã nhập lại và dựng thành công, giữ mục bài học và lựa chọn khung. Một bản sao ZIP cũ đã chuyển sang khung mới, giữ nguyên phụ đề/điểm cắt và lưu cách dựng cũ trong lịch sử.
 - Hai dự án gốc được so sánh trước/sau và không bị chuyển khung hoặc thay đổi dữ liệu. Bản kiểm tra chuyển đổi chỉ thực hiện trên bản sao riêng.
 - Đã quét Git index, không có key đã cấu hình, `.env`, video nguồn, dữ liệu dự án, bản xuất hoặc bộ nhớ đệm trong các tệp chuẩn bị công bố.

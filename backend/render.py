@@ -234,7 +234,7 @@ def render(project, plan, transcript, context, preview=True):
     result=render_dir/('preview.mp4' if preview else 'final.mp4')
     manifest=render_dir/'manifest.json'
     if manifest.exists() and result.exists():
-        return json.loads(manifest.read_text(encoding='utf-8'))
+        return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
     source=folder/project['source_file']
     chunk_size=20
     count=math.ceil(duration/chunk_size)

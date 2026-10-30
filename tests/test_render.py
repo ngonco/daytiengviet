@@ -34,5 +34,7 @@ class RenderIntegration(unittest.TestCase):
             self.assertEqual(next(s for s in probe['streams'] if s['codec_type']=='audio')['channels'],2)
             self.assertTrue((folder/result['folder']/'subtitles.en.srt').exists())
             self.assertEqual(render(project,plan,{},Context(folder),True)['digest'],result['digest'])
+            project['revision']=2
+            self.assertEqual(render(project,plan,{},Context(folder),True)['revision'],2)
 
 if __name__=='__main__':unittest.main()
