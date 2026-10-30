@@ -579,16 +579,38 @@ def import_project(file:UploadFile=File(...)):
     finally:
         temp.unlink(missing_ok=True)
 
-if (ROOT/'dist').exists():
-    app.mount('/',StaticFiles(directory=ROOT/'dist',html=True),name='frontend')
+class ThumbnailBody(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    lesson_id: str | None=None
+    en: str=Field(max_length=1000)
+    vi: str=Field(max_length=800)
+    asset_id: str | None=None
+    crop: PhotoCrop=Field(default_factory=PhotoCrop)
+
+
+def thumbnail_response(project_id, draft=None):
+    from .thumbnail import render_thumbnail
+    project=store.read(project_id)
+    try:
+        content=render_thumbnail(project, store.folder(project_id), draft)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(422, 'Không đọc được ảnh. Hãy chọn ảnh minh hoạ khác.') from exc
+    return Response(content, media_type='image/png', headers={
+        'Content-Disposition': 'attachment; filename="'+basename(project)+'-thumbnail.png"',
+        'Cache-Control': 'no-store'})
 
 
 @app.get('/api/projects/{project_id}/thumbnail')
 def thumbnail(project_id: str):
-    from .thumbnail import render_thumbnail
-    project = store.read(project_id)
-    try:
-        content = render_thumbnail(project, store.folder(project_id))
-    except (ValueError, OSError) as exc:
-        raise HTTPException(422, 'Thumbnail text or illustration is invalid.') from exc
-    return Response(content, media_type='image/png', headers={'Content-Disposition': 'attachment; filename="' + basename(project) + '-thumbnail.png"', 'Cache-Control': 'no-store'})
+    return thumbnail_response(project_id)
+
+
+@app.post('/api/projects/{project_id}/thumbnail')
+def thumbnail_draft(project_id: str, body: ThumbnailBody):
+    return thumbnail_response(project_id, body.model_dump())
+
+
+if (ROOT/'dist').exists():
+    app.mount('/',StaticFiles(directory=ROOT/'dist',html=True),name='frontend')
