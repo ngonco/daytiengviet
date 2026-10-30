@@ -12,6 +12,7 @@ export default function ThumbnailEditor({projectId,lessons,assets,selected,onClo
   const controller=new AbortController();let url='';setLoading(true);setPreview('');setError('');
   const timer=setTimeout(async()=>{try{
    const response=await fetch(`/api/projects/${projectId}/thumbnail`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lesson_id:lessonId,en,vi,asset_id:assetId||null,crop:{x,y,zoom}}),signal:controller.signal});
+   if(response.status===404||response.status===405)throw new Error('Máy chủ VietCut đang dùng phiên bản cũ. Hãy khởi động lại ứng dụng rồi tải lại trang (Ctrl + F5).');
    if(!response.ok){const data=await response.json();throw new Error(typeof data.detail==='string'?data.detail:'Nội dung không hợp lệ. Hãy kiểm tra chữ và ảnh.')}
    const blob=await response.blob();if(controller.signal.aborted)return;url=URL.createObjectURL(blob);setPreview(url);
   }catch(e){if(!controller.signal.aborted)setError((e as Error).message)}finally{if(!controller.signal.aborted)setLoading(false)}},200);
