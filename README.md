@@ -4,6 +4,14 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Tự cân âm lượng giọng nói (v1.5.1)
+
+**CÁCH DỰNG → Tự cân âm lượng giọng nói** mặc định bật. Bản dựng trực tiếp tự đo nguồn và tăng âm khi nhỏ, giới hạn theo đỉnh âm để tránh vỡ tiếng; có trạng thái đang đo/đã cân. Tắt công tắc để so sánh với mức gốc. Bản gốc vẫn phát âm thanh nguyên bản.
+
+Khi xuất thủ công hoặc tự động theo thư mục, app đo lại âm thanh sau các điểm cắt và cân hai lượt về mức nghe rõ, rồi mới trộn nhạc/hiệu ứng. Nhạc vẫn tự hạ khi có giọng nói. Phần hình và kết quả xoá phông được dùng lại khi chỉ thay đổi cân âm. Nguồn im lặng không bị kéo âm lên vô hạn. Đây là cân âm lượng, không phải lọc tạp âm.
+
+Trên bản sao nguồn thử, âm lượng tăng từ -25,86 lên -16,07 LUFS (khoảng 9,79 LU), giữ nguyên nguồn và thời lượng. File đã xuất trước cập nhật cần **Xuất video** lại để có âm lượng mới; app giữ nguyên các file cũ và lịch sử nguồn đã hoàn tất.
+
 ## Tự động dựng và xuất cạnh source (v1.5)
 
 Mở **Tự động dựng → Chọn thư mục → Bật tự động dựng**. App nhận video đang có và video mới trong cả thư mục con, chờ file ổn định ít nhất 10 giây rồi xử lý lần lượt. Video gốc **đến hết 90 giây xuất dọc 1080×1920**, trên 90 giây xuất ngang 1920×1080; phụ đề Việt–Anh, khung bài học và xoá phông GPU. Bản MP4 cuối được kiểm tra rồi lưu ngay cạnh từng source, không dựng thêm MP4 xem trước.

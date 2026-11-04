@@ -1,3 +1,4 @@
+from .audio import AUDIO_VERSION, voice_filter
 from .seo import metadata_args, title
 import hashlib
 import json
@@ -56,7 +57,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     used={l.get('asset_id') for l in plan['lessons'] if l.get('asset_id')}
     hashes={key:hashlib.sha256((folder/'assets'/asset['file']).read_bytes()).hexdigest() for key,asset in project.get('assets',{}).items() if key in used}
     theme=signature();focus=speaker_focus(project,w,h)
-    identity={'seo_title':title(project),'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
+    identity={'audio_version':AUDIO_VERSION,'seo_title':title(project),'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
     code=digest(identity);render_dir=folder/'renders'/code;render_dir.mkdir(parents=True,exist_ok=True)
     result=render_dir/('preview.mp4' if preview else 'final.mp4');manifest=render_dir/'manifest.json'
     if result.exists() and manifest.exists():return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
@@ -131,10 +132,11 @@ def render_lessons(project,plan,transcript,context,preview=True):
     concat=render_dir/'concat.txt'
     concat.write_text('\n'.join("file '"+str(p.resolve()).replace('\\','/').replace("'","'\\''")+"'" for p in chunks),encoding='utf-8')
     args=['-f','concat','-safe','0','-i',concat]
-    af=['[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[voice]'];mix=['voice'];n=1
+    voice,audio_details=voice_filter(args,context,project['options'].get('auto_volume',True),render_dir/'voice-level.json')
+    af=[f'[0:a]{voice}[voice]'];mix=['voice'];n=1
     if project.get('music_file'):
         args+=['-stream_loop','-1','-i',folder/project['music_file']]
-        af[0]='[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,asplit=2[voice][sidechain]'
+        af[0]=f'[0:a]{voice},asplit=2[voice][sidechain]'
         af += [f'[{n}:a]volume=0.16,aresample=48000[music]','[music][sidechain]sidechaincompress=threshold=0.025:ratio=10:attack=20:release=250[duck]'];mix.append('duck');n+=1
     if project['options'].get('sfx',True):
         sfx=render_dir/'effects.wav';sound_effects(sfx,duration,[l['output_start'] for l in lessons[1:]])
@@ -145,6 +147,6 @@ def render_lessons(project,plan,transcript,context,preview=True):
     temp.replace(result);write_srt(project,plan,render_dir)
     atomic_json(render_dir/'edit-plan.json',{'plan':plan,'options':project['options'],'source_file':project['source_file'],'time_map':spans})
     atomic_json(render_dir/'credits.json',[{'photographer':a.get('photographer','Bạn cung cấp'),'url':a.get('url',''),'photographer_url':a.get('photographer_url','')} for key,a in project.get('assets',{}).items() if key in used])
-    details={'file':result.relative_to(folder).as_posix(),'folder':render_dir.relative_to(folder).as_posix(),'width':w,'height':h,'duration':duration,'revision':project['revision'],'digest':code,'preview':preview,'renderer_version':RENDER_VERSION,'lesson_renderer_version':LESSON_RENDER_VERSION,'template_signature':theme,'layout_mode':'lesson'}
+    details={'audio':audio_details,'file':result.relative_to(folder).as_posix(),'folder':render_dir.relative_to(folder).as_posix(),'width':w,'height':h,'duration':duration,'revision':project['revision'],'digest':code,'preview':preview,'renderer_version':RENDER_VERSION,'lesson_renderer_version':LESSON_RENDER_VERSION,'template_signature':theme,'layout_mode':'lesson'}
     atomic_json(manifest,details)
     return details

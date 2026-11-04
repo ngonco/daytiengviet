@@ -22,7 +22,7 @@ export default function AutomationPanel({onOpen}:{onOpen:(id:string)=>void}){
    <div className="field-row"><button className="secondary" disabled={pending||data?.config.enabled} onClick={()=>act(async()=>{const result=await request('/folder');if(result.folder){setFolder(result.folder);setEdited(false);await request('',{folder:result.folder},'PUT')}})}><FolderOpen size={16}/> Chọn thư mục</button>
    <button className="secondary" disabled={pending||!folder} onClick={()=>act(async()=>{await request('',{folder},'PUT');setEdited(false);await request('/scan')})}><RefreshCw size={16}/> Quét ngay</button>
    <button className="primary" disabled={pending||!folder} onClick={()=>act(async()=>{await request('',data?.config.enabled?{enabled:false}:{folder,enabled:true},'PUT');setEdited(false)})}>{data?.config.enabled?<><Pause size={16}/> Tạm dừng nhận nguồn</>:<><Play size={16}/> Bật tự động dựng</>}</button></div>
-   <p><b>Đến 90 giây: dọc 9:16 · Trên 90 giây: ngang 16:9</b><br/>Full HD · Phụ đề Việt–Anh · Xoá phông GPU tại máy</p>
+   <p><b>Đến 90 giây: dọc 9:16 · Trên 90 giây: ngang 16:9</b><br/>Full HD · Phụ đề Việt–Anh · Xoá phông GPU tại máy · Tự cân âm lượng giọng nói</p>
    <small>Nhớ nguồn theo nội dung dù đổi tên hoặc chuyển thư mục. Chỉ nhận file đã chép ổn định. Tạm dừng vẫn để video đang dựng hoàn tất. Giữ VietCut chạy để tiếp tục theo dõi.</small>
    <p role="status">{pending?'Đang xử lý…':data?.config.message||'Chưa bật theo dõi.'}</p>
   </div>

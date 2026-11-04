@@ -1,5 +1,6 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {PreviewRequests} from './preview_requests';
+import {configurePreviewAudio,resumePreviewAudio,releasePreviewAudio} from './audio_volume';
 type Scene={sequence:number;width:number;height:number;geometry:{speaker:number[];radius:number};speaker_transform:{left:number;top:number;width:number;height:number};page:string;subtitle:string|null;subtitle_rect:number[]|null;source:{file:string;state:string;message?:string}};
 type Props={project:any;plan:any;options:any;videoRef:React.RefObject<HTMLVideoElement|null>;busy:boolean;dirty:boolean;onTime:(time:number)=>void;onPlay:(playing:boolean)=>void;onPrepare:()=>void};
 const media=(id:string,path:string)=>`/api/projects/${id}/media/${path.split('/').map(encodeURIComponent).join('/')}`;
@@ -7,6 +8,7 @@ const at=(items:any[],time:number)=>items.find(i=>i.start<=time&&i.end>time);
 
 export default function LivePreview({project,plan,options,videoRef,busy,dirty,onTime,onPlay,onPrepare}:Props){
  const [scene,setScene]=useState<Scene|null>(null),[error,setError]=useState(''),[time,setTime]=useState(0),[playing,setPlaying]=useState(false);
+ const [audioStatus,setAudioStatus]=useState(''),[audioError,setAudioError]=useState('');
  const timeRef=useRef(0),autoAttempt=useRef(''),cueRef=useRef(''),lastRequestCue=useRef('');
  const lesson=at(plan.lessons,time)||plan.lessons.at(-1),caption=at(plan.captions,time);
  const packet=JSON.stringify({lesson:lesson||{vi:'',en:'',chunks:[]},caption:caption?{vi:caption.vi,en:caption.en}:null,options});
@@ -21,6 +23,18 @@ export default function LivePreview({project,plan,options,videoRef,busy,dirty,on
   requests.update(JSON.parse(packet),cue!==lastRequestCue.current?0:100);lastRequestCue.current=cue;
  },[packet,project.id,project.matting?.code]);
  useEffect(()=>()=>requests.dispose(),[requests]);
+ useEffect(()=>{
+  const video=videoRef.current;if(!video||!scene)return;
+  const enabled=options.auto_volume!==false;let disposed=false;const controller=new AbortController();
+  configurePreviewAudio(video,enabled);setAudioError('');setAudioStatus(enabled?'Đang tự cân âm lượng giọng nói…':'Đang nghe âm lượng gốc.');
+  const play=()=>{resumePreviewAudio(video).catch(()=>{if(!disposed)setAudioError('Chưa tăng được âm lượng trong trình duyệt. File xuất vẫn được cân âm tự động.')})};
+  video.addEventListener('play',play);
+  if(enabled)fetch(`/api/projects/${project.id}/audio-level`,{signal:controller.signal}).then(async response=>{
+   if(!response.ok)throw new Error('Chưa đo được âm lượng. Thử tải lại trang; file xuất vẫn được cân âm tự động.');
+   return response.json();
+  }).then(level=>{if(!disposed){configurePreviewAudio(video,true,level.gain_db);setAudioStatus(level.silent?'Nguồn hiện không có tiếng nói rõ để tăng âm.':'Đã tự cân âm lượng giọng nói khi xem trực tiếp.');if(!video.paused)play()}}).catch(e=>{if(!disposed)setAudioError((e as Error).message)});
+  return()=>{disposed=true;controller.abort();video.removeEventListener('play',play);releasePreviewAudio(video)};
+ },[scene?.source.file,project.id,options.auto_volume]);
  useEffect(()=>{
   const key=project.id+'-'+project.revision;
   if(scene?.source.state==='pending'&&!busy&&!dirty&&autoAttempt.current!==key){autoAttempt.current=key;onPrepare()}
@@ -52,6 +66,8 @@ export default function LivePreview({project,plan,options,videoRef,busy,dirty,on
    </div>:<span>Đang chuẩn bị khung xem trực tiếp…</span>}
   </div>
   <div className="live-controls"><button className="secondary" disabled={!scene} onClick={()=>{const v=videoRef.current;if(v){if(v.paused)v.play().catch(e=>setError(e.message));else v.pause()}}}>{playing?'Tạm dừng':'Phát'}</button><input aria-label="Tua bản xem trực tiếp" type="range" min="0" max={project.metadata.duration} step=".033333" value={Math.min(time,project.metadata.duration)} onChange={e=>seek(Number(e.target.value))}/></div>
+  {audioStatus&&<p className="audio-status" role="status">{audioStatus}</p>}
+  {audioError&&<p className="live-warning" role="alert">{audioError}</p>}
   {error&&<p className="live-warning" role="alert">{error} Khung đang giữ trạng thái hợp lệ gần nhất.</p>}
   {scene?.source.state==='pending'&&<p className="live-warning">{scene.source.message} <button className="text-button" disabled={busy||dirty} onClick={onPrepare}>{busy?'Đang cập nhật…':'Cập nhật người nói'}</button></p>}
  </>

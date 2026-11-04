@@ -29,6 +29,7 @@ class Options(BaseModel):
     subtitles: Literal['bilingual','vi','off']='bilingual'
     language: Literal['vi','en','auto']='auto'
     sfx: bool=True
+    auto_volume: bool=True
     zoom: bool=True
     fit: Literal['contain','cover']='contain'
     focus_x: float=Field(default=.5,ge=0,le=1)
@@ -105,7 +106,7 @@ async def lifespan(app):
         try:await maintenance
         except asyncio.CancelledError:pass
 
-app=FastAPI(title='VietCut Studio',version='1.5.0',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.5.1',lifespan=lifespan)
 
 class AutomationConfig(BaseModel):
     folder: str | None=None
@@ -215,7 +216,7 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.5.0'}
+    return {'ok':True,'app':'vietcut','version':'1.5.1'}
 
 @app.get('/api/trash')
 def trash():
@@ -286,6 +287,12 @@ def upload(file:UploadFile=File(...),title:str=Form('Bài học mới'),options:
 @app.get('/api/projects/{project_id}')
 def get_project(project_id:str):
     return project_read(project_id)
+
+@app.get('/api/projects/{project_id}/audio-level')
+def audio_level(project_id:str):
+    from .audio import preview_level
+    project=store.read(project_id)
+    return preview_level(store.folder(project_id)/project['source_file'])
 
 @app.post('/api/projects/{project_id}/jobs/{kind}')
 def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker']):

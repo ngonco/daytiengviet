@@ -1,3 +1,4 @@
+from .audio import AUDIO_VERSION, voice_filter
 from .seo import metadata_args, title
 import hashlib
 import json
@@ -229,7 +230,7 @@ def render(project, plan, transcript, context, preview=True):
         raise ValueError('Không có đoạn giữ lại để dựng')
     # Every render has an immutable identity. A failed new render never overwrites a good one.
     matting_code=project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None
-    identity={'seo_title':title(project),'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
+    identity={'audio_version':AUDIO_VERSION,'seo_title':title(project),'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
     digest=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:18]
     render_dir=folder/'renders'/digest
     render_dir.mkdir(parents=True,exist_ok=True)
@@ -255,7 +256,7 @@ def render(project, plan, transcript, context, preview=True):
             a,b=max(start,span['output_start']),min(end,span['output_end'])
             if b>a+.001:
                 pieces.append({'start':span['start']+a-span['output_start'],'duration':b-a})
-        chunk_hash=hashlib.sha256(json.dumps({'v':RENDER_VERSION,'size':[w,h],'pieces':pieces,'captions':local_captions,'visuals':local_visuals,'options':project['options'],'start':start,'matting':matting_code},sort_keys=True).encode()).hexdigest()[:24]
+        chunk_hash=hashlib.sha256(json.dumps({'v':RENDER_VERSION,'size':[w,h],'pieces':pieces,'captions':local_captions,'visuals':local_visuals,'options':{k:v for k,v in project['options'].items() if k!='auto_volume'},'start':start,'matting':matting_code},sort_keys=True).encode()).hexdigest()[:24]
         cache_dir=folder/'render-cache'/chunk_hash
         cache_dir.mkdir(parents=True,exist_ok=True)
         chunk=cache_dir/'chunk.mkv'
@@ -311,13 +312,14 @@ def render(project, plan, transcript, context, preview=True):
     concat=render_dir/'concat.txt'
     concat.write_text('\n'.join("file '"+str(p.resolve()).replace('\\','/').replace("'", "'\\''")+"'" for p in chunks),encoding='utf-8')
     args=['-f','concat','-safe','0','-i',concat]
-    audio_filters=['[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[voice]']
+    voice,audio_details=voice_filter(args,context,project['options'].get('auto_volume',True),render_dir/'voice-level.json')
+    audio_filters=[f'[0:a]{voice}[voice]']
     mix=['voice']
     next_input=1
     music=project.get('music_file')
     if music:
         args+=['-stream_loop','-1','-i',folder/music]
-        audio_filters[0]='[0:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,asplit=2[voice][sidechain]'
+        audio_filters[0]=f'[0:a]{voice},asplit=2[voice][sidechain]'
         audio_filters+=[f'[{next_input}:a]volume=0.16,aresample=48000[music]', '[music][sidechain]sidechaincompress=threshold=0.025:ratio=10:attack=20:release=250[duck]']
         mix.append('duck'); next_input+=1
     if project['options'].get('sfx',True):
@@ -336,6 +338,6 @@ def render(project, plan, transcript, context, preview=True):
     used_assets={v.get('asset_id') for v in plan['visuals'] if v['enabled']}
     credits=[{'photographer':a.get('photographer','Bạn cung cấp'),'url':a.get('url',''),'photographer_url':a.get('photographer_url','')} for asset_id,a in project.get('assets',{}).items() if asset_id in used_assets]
     atomic_json(render_dir/'credits.json',credits)
-    details={'file':str(result.relative_to(folder)).replace('\\','/'),'folder':str(render_dir.relative_to(folder)).replace('\\','/'),'width':w,'height':h,'duration':duration,'revision':project['revision'],'digest':digest,'preview':preview,'renderer_version':RENDER_VERSION}
+    details={'audio':audio_details,'file':str(result.relative_to(folder)).replace('\\','/'),'folder':str(render_dir.relative_to(folder)).replace('\\','/'),'width':w,'height':h,'duration':duration,'revision':project['revision'],'digest':digest,'preview':preview,'renderer_version':RENDER_VERSION}
     atomic_json(manifest,details)
     return details
