@@ -68,10 +68,10 @@ def extract_frames(source, folder, metadata, context):
         except (ValueError,TypeError,KeyError):
             pass
     interval = max(15.0, metadata['duration'] / 119)
-    ffmpeg(['-i', source, '-vf', f'fps=1/{interval},scale=480:-2', '-frames:v', '120', '-q:v', '4', frames_dir / 'f%03d.jpg'], context)
+    ffmpeg(['-i', source, '-vf', f'fps=1/{interval},scale=480:-2,format=yuvj420p', '-frames:v', '120', '-q:v', '4', frames_dir / 'f%03d.jpg'], context)
     files = sorted(frames_dir.glob('f*.jpg'))
     if not files:
-        ffmpeg(['-ss', '0', '-i', source, '-frames:v', '1', '-vf', 'scale=480:-2', frames_dir / 'f001.jpg'], context)
+        ffmpeg(['-ss', '0', '-i', source, '-frames:v', '1', '-vf', 'scale=480:-2,format=yuvj420p', frames_dir / 'f001.jpg'], context)
         files = sorted(frames_dir.glob('f*.jpg'))
     frames = []
     try:

@@ -4,6 +4,18 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Tự động dựng và xuất cạnh source (v1.5)
+
+Mở **Tự động dựng → Chọn thư mục → Bật tự động dựng**. App nhận video đang có và video mới trong cả thư mục con, chờ file ổn định ít nhất 10 giây rồi xử lý lần lượt. Video gốc **đến hết 90 giây xuất dọc 1080×1920**, trên 90 giây xuất ngang 1920×1080; phụ đề Việt–Anh, khung bài học và xoá phông GPU. Bản MP4 cuối được kiểm tra rồi lưu ngay cạnh từng source, không dựng thêm MP4 xem trước.
+
+App nhớ nội dung file dù đổi tên/chuyển thư mục, tận dụng dự án phù hợp và bỏ qua nguồn đã xuất thành công. Lịch sử này vẫn còn khi dự án vào Thùng rác hoặc hết hạn lưu. File xuất không được nhận lại làm nguồn. Lỗi tạm thời thử lại hai lần; nguồn vẫn lỗi được ghi riêng để tiếp tục nguồn khác. Lỗi lưu chỉ thử lại việc lưu, không gọi lại AI. Thiếu GPU hoặc cấu hình cần sửa rồi bấm **Thử lại**. **Tạm dừng nhận nguồn** dừng nhận/xếp việc mới, để tác vụ hiện tại hoàn tất. **Quét ngay** vẫn chờ file ổn định. Giữ VietCut chạy để theo dõi; mở lại app sẽ tiếp tục hàng đợi, không cần giữ tab trình duyệt mở.
+
+Dự án mới để trống tên sẽ tự lấy từ/câu hoặc chủ đề đang dạy. Có nút **Đổi tên**; tên tự đặt được giữ khi thử lại. Tên dự án cũ không tự đổi. Video xuất mới dùng **`<tên bài học> - learn vietnamese.mp4`**, giữ dấu tiếng Việt; nếu file đã tồn tại sẽ thêm số thứ tự. File xuất cũ không bị ghi đè.
+
+Xoá phông v3 sửa lỗi hết hình ở đuôi clip khi thời lượng hình/tiếng lệch nhau, giữ checkpoint và trạng thái theo dõi qua mỗi đoạn. Phần ghép màu/chuyển dữ liệu chuyển sang GPU khi không có nét cọ, giảm ghi tiến độ và không ghép nền hai lần. Đo cùng clip 20 giây trên RTX 3060 Laptop: **127,97 → 61,67 giây**, giảm **51,8%** toàn luồng; mặt nạ tại ba mốc so sánh không đổi. Đây là số đo của clip/máy thử, không phải cam kết tốc độ mọi video hay bằng CapCut. Không dùng SDK thương mại, không đổi Torch CPU và không tự chuyển AI sang CPU.
+
+Sau cập nhật cần khởi động lại máy chủ VietCut rồi tải lại trang; đóng/mở tab riêng không nạp lại mã Python.
+
 ## Khung pastel, xem trực tiếp và Thùng rác (v1.4)
 
 Video dọc đặt **ảnh trên → từ/câu ở giữa → người nói dưới khoảng 30%**. Phụ đề song ngữ nằm ở đáy ảnh trên. Video ngang giữ bố cục người nói trái, bài học phải. Cả hai dùng be/trắng/xanh pastel, chữ navy, viền mảnh và tên kênh nhỏ.

@@ -1,4 +1,4 @@
-from .seo import basename
+from .seo import basename, video_filename
 import asyncio
 import json
 import shutil
@@ -91,6 +91,8 @@ async def lifespan(app):
     from . import retention
     await asyncio.to_thread(retention.sweep)
     worker.start()
+    from . import automation
+    folder_stop=automation.start()
     async def maintain():
         while True:
             await asyncio.sleep(3600)
@@ -98,11 +100,53 @@ async def lifespan(app):
     maintenance=asyncio.create_task(maintain())
     try:yield
     finally:
+        folder_stop.set()
         maintenance.cancel()
         try:await maintenance
         except asyncio.CancelledError:pass
 
-app=FastAPI(title='VietCut Studio',version='1.4.0',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.5.0',lifespan=lifespan)
+
+class AutomationConfig(BaseModel):
+    folder: str | None=None
+    enabled: bool | None=None
+
+class ProjectTitle(BaseModel):
+    title: str=Field(min_length=1,max_length=120)
+
+@app.get('/api/automation')
+def automation_read():
+    from .automation import snapshot
+    return snapshot()
+
+@app.put('/api/automation')
+def automation_config(body:AutomationConfig):
+    from .automation import configure,snapshot
+    configure(body.folder,body.enabled)
+    return snapshot()
+
+@app.post('/api/automation/folder')
+def automation_folder():
+    from .automation import native_folder
+    return {'folder':native_folder()}
+
+@app.post('/api/automation/scan')
+def automation_scan():
+    from .automation import scan,snapshot
+    scan(force=True)
+    return snapshot()
+
+@app.post('/api/automation/items/{code}/retry')
+def automation_retry(code:str):
+    from .automation import retry
+    return retry(code)
+
+@app.patch('/api/projects/{project_id}/title')
+def project_title(project_id:str,body:ProjectTitle):
+    idle(project_id)
+    if not body.title.strip():raise ValueError('Tên bài học không được để trống.')
+    store.update(project_id,title=body.title.strip(),title_mode='manual')
+    return project_read(project_id)
 
 @app.middleware('http')
 async def local_access(request:Request,call_next):
@@ -142,7 +186,7 @@ def idle(project_id):
     if any(j['status'] in ['queued','running','cancelling'] for j in store.jobs(project_id)):
         raise HTTPException(409,'Dự án đang xử lý. Hãy đợi hoặc hủy tác vụ trước khi chỉnh sửa.')
 
-def create(source:Path,title,options,project_id=None,move=False):
+def create(source:Path,title,options,project_id=None,move=False,job_request=None):
     metadata=probe(source)
     project_id=project_id or store.uid()
     folder=store.folder(project_id)
@@ -162,15 +206,16 @@ def create(source:Path,title,options,project_id=None,move=False):
         portrait=values['ratio']=='9:16' or values['ratio']=='original' and metadata['height']>metadata['width']
         values['style']='energetic' if portrait else 'education'
     project={'id':project_id,'title':title[:120] or 'Bài học mới','source_file':target.name,'original_name':source.name,'metadata':metadata,'options':values,'status':'new','revision':0,'plan':None,'transcript':None,'assets':{},'frames':[],'warnings':[],'preview':None,'export':None,'music_file':None,'created_at':store.now()}
+    project['title_mode']='auto' if title.strip() in ['', 'Bài học mới', 'Bài học tiếng Việt'] else 'manual'
     store.save(project)
-    store.job_create(project_id,'pipeline')
+    store.job_create(project_id,'pipeline',job_request)
     from .retention import sweep
     sweep(protect=project_id)
     return project_read(project_id)
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.4.0'}
+    return {'ok':True,'app':'vietcut','version':'1.5.0'}
 
 @app.get('/api/trash')
 def trash():
@@ -522,7 +567,7 @@ def download(project_id:str,kind:Literal['video','vi','en','project','credits'])
     path=folder/relative
     if not path.exists():
         raise HTTPException(404,'Không tìm thấy bản xuất.')
-    return FileResponse(path,filename=basename(project)+('.mp4' if kind=='video' else '.'+kind+'.srt' if kind in ['vi','en'] else '-credits.json'))
+    return FileResponse(path,filename=video_filename(project) if kind=='video' else basename(project)+('.'+kind+'.srt' if kind in ['vi','en'] else '-credits.json'))
 
 @app.post('/api/projects/import')
 def import_project(file:UploadFile=File(...)):

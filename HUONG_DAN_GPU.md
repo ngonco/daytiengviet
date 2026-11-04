@@ -18,13 +18,25 @@ Bộ xử lý nằm trong `data/runtime/matting`; mô hình trong `data/runtime/
 - Làm mềm viền 0–4 px; co viền số dương, nới viền số âm. Đơn vị là pixel ở độ phân giải làm việc, không phải kích thước bản xem trước.
 - Bấm **Dừng** để hủy. **Thử lại** hoặc dựng lại sẽ tiếp tục từ đoạn 20 giây hoàn tất gần nhất. Phần đang làm dở được tính lại; không tái dùng tệp chưa có dấu hoàn tất.
 
+## Tăng tốc và phục hồi (v1.5)
+
+Bộ xử lý v3 giữ nguyên RVM, kích thước và đủ 30 khung/giây. Với GPU và không có nét cọ, chỉ đưa alpha về CPU để tinh viền, giữ RGB trên GPU để ghép nền/đổi sang byte trước khi chuyển về bộ mã hoá. Khi có nét cọ, vẫn dùng đường xử lý giữ/bỏ đầy đủ. Đọc trước hai khung và hàng đợi ghi hai khung cho mỗi lớp có giới hạn bộ nhớ; không tải toàn bộ clip lên RAM. Tiến độ ghi tối đa hai lần/giây, checkpoint từng đoạn vẫn bắt buộc.
+
+Bản ghép nền từng đoạn được dùng thẳng nếu đúng màu và phiên bản; chỉ ghép lại khi đổi màu. Cache v3 phân biệt với v2, không xóa hay ghi đè cache cũ. Lần chạy đầu sau nâng cấp có thể phải xử lý lại; các lần dừng/tiếp tục trong cùng phiên bản dùng đoạn đã hoàn tất và trạng thái mô hình/cọ đã lưu.
+
+Thời lượng container/âm thanh không còn được coi là số khung giải mã chính xác. Bộ giải mã chuẩn hoá từ thời gian nguồn 0 rồi mới bỏ các khung đã xử lý khi tiếp tục, tránh lệch video FPS biến đổi. Khi hết hình sạch, chỉ bù khung cuối cho phần đuôi chênh đã xác minh từ thời gian luồng hình và sai số làm tròn; lỗi giải mã, khung thiếu dữ liệu hoặc hết sớm bất thường vẫn dừng với thông báo. Chi tiết lỗi kỹ thuật nằm trong `matting/<mã>/failure.json` tại máy.
+
+Đo ngày 04/11/2026 trên RTX 3060 Laptop 6 GB, cùng bản sao clip 20,011 giây, CUDA FP16/NVENC, cache mới: **127,969 giây trước → 61,668 giây sau**, giảm **51,81%** toàn luồng. Cache có sẵn của clip thử trả kết quả trong khoảng 0,022 giây, gồm kiểm tra hash. Alpha ở 0,2 / 5 / 19,9 giây giống từng byte; đã xem trên nền đen/trắng/kem. Bản sao nguồn lỗi 63,301 giây hoàn tất sau huỷ/tiếp tục tại checkpoint 600 khung, giữ nguyên các file checkpoint và giải mã toàn bộ thành công. Không suy rộng số đo này thành cam kết CapCut hoặc mọi clip.
+
+`stats.json` có `timings`: chờ đọc/giải mã, đưa lên GPU, đưa về CPU, sửa viền/cọ, ghép/đóng gói, ghi bộ mã hoá và chờ kết thúc mã hoá. Các giai đoạn chạy chồng lấp; không cộng các mục này để suy ra thời gian toàn luồng. Dùng `python -m scripts.benchmark_matting_speed --source <bản-sao-clip> --baseline <runner-trước-sửa>` để đo có kiểm soát; không chạy đồng thời hai việc GPU. `python -m scripts.acceptance_matting_recovery --source <bản-sao-clip>` kiểm tra huỷ/tiếp tục và EOF. Hai công cụ chỉ tạo dữ liệu riêng trong OUTPUT, không gọi dịch vụ AI hoặc sửa dự án có sẵn.
+
 ## Kỹ thuật và dữ liệu
 
 RVM MobileNetV3 official release v1.0.0; FP16 CUDA, FP32 khi người dùng chọn CPU. Xử lý tuần tự CFR 30 fps; cạnh dài đầu vào tối đa 1920, mạng nội bộ tối đa 512. Khởi tạo bằng một hình 4D (yêu cầu của TorchScript upstream), sau đó nhóm 4 hình; khi GPU hết bộ nhớ giảm xuống từng hình. Bốn tensor ghi nhớ được lưu sau mỗi đoạn, không đặt lại tại ranh giới 20 giây.
 
 Mỗi đoạn có lớp màu người H.264 yuv444p, mặt nạ xám FFV1 không mất dữ liệu, bản ghép kem, trạng thái mô hình NPZ không pickle và trạng thái theo dõi vùng. Màu người được nén QP16 bằng NVENC khi có, hoặc CRF16 bằng CPU; mặt nạ không bị nén mất dữ liệu. Bộ mã hóa GPU giảm tải CPU, nhưng phép đo toàn luồng vẫn gồm đọc/ghi, tinh viền và lưu lớp. Luồng Windows dùng bộ đệm 1 MB cố định thay cho 4 KB mặc định. Âm thanh luôn lấy từ bản nguồn, qua cùng bản đồ cắt như trước.
 
-Bộ nhớ đệm phụ thuộc toàn bộ byte video nguồn, mã băm mô hình, phiên bản xử lý, kích thước, màu kem, tham số viền và nét sửa. Đổi tỷ lệ, bài học, ảnh hoặc điểm cắt dùng lại kết quả. Đổi viền/cọ hiện tính lại bước xóa phông cho cấu hình đó; chưa tách riêng bộ nhớ đệm thô và bước sửa viền.
+Bộ nhớ đệm phụ thuộc toàn bộ byte video nguồn, mã băm mô hình, phiên bản xử lý, kích thước, tham số viền và nét sửa; bản ghép màu có mã riêng. Đổi tỷ lệ, bài học, ảnh hoặc điểm cắt dùng lại kết quả. Đổi viền/cọ hiện tính lại bước xóa phông cho cấu hình đó; chưa tách riêng bộ nhớ đệm thô và bước sửa viền.
 
 ZIP chỉ mang cấu hình và nét sửa trong options, không mang mô hình, môi trường GPU, mặt nạ hay trạng thái xử lý. Khi nhập, app tạo lại kết quả tại máy. Tất cả dữ liệu này nằm ngoài Git.
 

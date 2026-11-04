@@ -52,7 +52,11 @@ def execute(job):
     project=store.read(job['project_id'])
     request=json.loads(job['request'])
     store.update(project['id'],status='working')
-    if job['kind']=='prepare_speaker':
+    if job['kind']=='auto_save':
+        from .automation import publish
+        publish(project,context,request['automation_hash'])
+        store.update(project['id'],status='ready')
+    elif job['kind']=='prepare_speaker':
         from .matting import ensure_matting
         result=ensure_matting(project,context)
         store.update(project['id'],matting=result,status='ready')
@@ -95,8 +99,15 @@ def execute(job):
             project=store.update(project['id'],plan=plan,options=project['options'],assets=assets,warnings=warnings+photo_warnings,vision_supported=vision,revision=project['revision']+1)
         else:
             plan=project['plan']
-        result=prepared_render(project,plan,transcript,context,True)
-        store.update(project['id'],preview=result,status='ready')
+        if project.get('title_mode')=='auto':
+            from .seo import lesson_title
+            project=store.update(project['id'],title=lesson_title(project))
+        automatic=bool(request.get('automation_hash'))
+        result=prepared_render(project,plan,transcript,context,not automatic)
+        project=store.update(project['id'],**{'export' if automatic else 'preview':result,'status':'ready'})
+        if automatic:
+            from .automation import publish
+            publish(project,context,request['automation_hash'])
     elif job['kind'] in ['preview','export']:
         if not project.get('plan'):
             raise ValueError('Dự án chưa có phương án dựng.')
@@ -106,6 +117,9 @@ def execute(job):
         preview=job['kind']=='preview'
         result=prepared_render(project,project['plan'],project.get('transcript',{}),context,preview)
         store.update(project['id'],**{'preview' if preview else 'export':result,'status':'ready'})
+        if not preview:
+            from .automation import output_record
+            output_record(context.folder/result['file'])
     else:
         raise ValueError('Tác vụ không hợp lệ')
 
@@ -125,14 +139,18 @@ def loop():
             if store.job_read(job['id'])['status'] in ['cancelled','cancelling']:
                 raise Cancelled()
             store.job_update(job['id'],status='succeeded',progress=100,message='Hoàn tất')
-        except Cancelled:
+        except Cancelled as exc:
             store.job_update(job['id'],status='cancelled',message='Đã hủy; kết quả từng bước vẫn được giữ')
             store.update(job['project_id'],status='ready' if store.read(job['project_id']).get('plan') else 'new')
+            from .automation import job_failed
+            job_failed(job,exc)
         except Exception as exc:
             # Provider exceptions are sanitized; never log request headers or .env.
             message=str(exc)[:2500]
             store.job_update(job['id'],status='failed',message='Chưa hoàn tất',error=message)
             store.update(job['project_id'],status='error')
+            from .automation import job_failed
+            job_failed(job,exc)
         finally:
             from .retention import sweep
             sweep()

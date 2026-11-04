@@ -33,7 +33,11 @@ def safe_path(project_id,location):
     return path
 
 
-def busy(project_id):return any(j['status'] in ACTIVE_JOBS for j in store.jobs(project_id))
+def busy(project_id):
+    if any(j['status'] in ACTIVE_JOBS for j in store.jobs(project_id)):return True
+    # A failed external save/retry still owns its export and must survive the delay.
+    from .automation import items
+    return any(r.get('project_id')==project_id and r['state'] in ['waiting','running','retry_wait'] for r in items())
 
 
 def _rollback_unmoved(project):

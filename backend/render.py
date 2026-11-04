@@ -1,4 +1,4 @@
-from .seo import metadata_args
+from .seo import metadata_args, title
 import hashlib
 import json
 import math
@@ -12,7 +12,7 @@ from .media import ffmpeg, font_path
 from .store import atomic_json
 from .timeline import keep_spans, map_interval
 
-RENDER_VERSION = 8
+RENDER_VERSION = 9
 
 def dimensions(project, preview=False):
     ratio = project['options']['ratio']
@@ -229,7 +229,7 @@ def render(project, plan, transcript, context, preview=True):
         raise ValueError('Không có đoạn giữ lại để dựng')
     # Every render has an immutable identity. A failed new render never overwrites a good one.
     matting_code=project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None
-    identity={'seo_title':project.get('title'),'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
+    identity={'seo_title':title(project),'renderer':RENDER_VERSION,'plan':plan,'options':project['options'],'assets':project.get('assets',{}),'preview':preview,'source':project['source_file'],'music':project.get('music_file'),'matting':matting_code}
     digest=hashlib.sha256(json.dumps(identity,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:18]
     render_dir=folder/'renders'/digest
     render_dir.mkdir(parents=True,exist_ok=True)

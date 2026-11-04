@@ -2,6 +2,7 @@
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -12,7 +13,7 @@ from .store import atomic_json
 from .media import ffmpeg
 from .matting_schema import validate_duration
 
-MATTING_VERSION = 2
+MATTING_VERSION = 3
 MODEL_RELEASE = 'v1.0.0'
 # Pinned official release bytes; filled and independently checked by setup.
 MODELS = {
@@ -67,7 +68,7 @@ def _run_layers(project,context,folder,identity,cfg):
         raise ValueError('Bộ xóa phông/mô hình chưa sẵn sàng. Chạy CAI_DAT_XOA_PHONG.cmd hoặc tắt Xóa phông rồi lưu lại.')
     if cfg.device == 'cuda' and not status['cuda']:
         raise ValueError('GPU chưa sẵn sàng. Chọn rõ Chạy CPU (chậm hơn) hoặc tắt Xóa phông; app không tự chuyển sang CPU.')
-    request = {**identity,'paper':json.loads((ROOT/'assets/frame_brand.json').read_text(encoding='utf-8'))['paper'],'source':str((context.folder/project['source_file']).resolve()),'model':str(model_path(cfg.device).resolve()), 'model_sha256':MODELS[cfg.device]['sha256'], 'folder':str(folder.resolve()),'duration':project['metadata']['duration'],'ffmpeg':binary('ffmpeg')}
+    request = {**identity,'paper':json.loads((ROOT/'assets/frame_brand.json').read_text(encoding='utf-8'))['paper'],'source':str((context.folder/project['source_file']).resolve()),'model':str(model_path(cfg.device).resolve()), 'model_sha256':MODELS[cfg.device]['sha256'], 'folder':str(folder.resolve()),'duration':project['metadata']['duration'],'ffmpeg':binary('ffmpeg'),'ffprobe':binary('ffprobe')}
     atomic_json(folder/'request.json', request)
     progress_file = folder/'progress.json'
     # Allocate an explicit progress range even when AI planning has already advanced the job.
@@ -76,7 +77,7 @@ def _run_layers(project,context,folder,identity,cfg):
     ceiling=88 if prior>50 else 56
     context.progress(prior,'Nạp mô hình xóa phông trên GPU' if cfg.device=='cuda' else 'Nạp mô hình xóa phông trên CPU đã chọn')
     with tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen([str(python_path()),str(ROOT/'scripts/matting_runner.py'),str(folder/'request.json')],stdout=errors,stderr=errors,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        process = subprocess.Popen([str(python_path()),str(ROOT/'scripts/matting_runner.py'),str(folder/'request.json')],stdout=errors,stderr=errors,env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             while process.poll() is None:
                 context.check()
@@ -97,7 +98,10 @@ def _run_layers(project,context,folder,identity,cfg):
             raise
         if process.returncode:
             errors.seek(0,2);size=errors.tell();errors.seek(max(0,size-1800))
-            raise RuntimeError('Xóa phông chưa hoàn tất: '+errors.read().decode('utf-8','replace')[-1500:])
+            detail=errors.read().decode('utf-8','replace').strip().splitlines()
+            atomic_json(folder/'failure.json',{'detail':'\n'.join(detail)[-1800:]})
+            message=detail[-1].removeprefix('RuntimeError: ') if detail else 'Bộ xử lý xóa phông bị dừng.'
+            raise RuntimeError('Xóa phông chưa hoàn tất: '+message[:500])
     stats=json.loads((folder/'stats.json').read_text(encoding='utf-8'))
     return stats
 
@@ -146,6 +150,10 @@ def ensure_matting(project,context):
         part=layers/f'{index:05}';frames=min(600,total-index*600)
         target=folder/f'part-{index:05}.mp4';chunks.append(target)
         if target.is_file() and target.with_suffix('.json').is_file():continue
+        entry=json.loads((part/'complete.json').read_text(encoding='utf-8'))
+        if entry.get('paper')==paper and entry.get('composition_version')==1 and (part/'composition.mp4').is_file():
+            chunks[-1]=part/'composition.mp4'
+            continue
         filters='[0:v]setpts=N/(30*TB),format=rgb24[f];[1:v]setpts=N/(30*TB),format=gray[a];[f][a]alphamerge[person];[2:v][person]overlay=shortest=1:format=auto,format=yuv420p[out]'
         ffmpeg(['-filter_complex_threads','1','-i',part/'foreground.mp4','-i',part/'alpha.mkv','-f','lavfi','-i',f'color=c={paper}:s={w}x{h}:r=30','-filter_complex',filters,'-map','[out]','-frames:v',frames,'-an','-c:v','libx264','-preset','veryfast','-crf','18',target],context)
         atomic_json(target.with_suffix('.json'),{'frames':frames})

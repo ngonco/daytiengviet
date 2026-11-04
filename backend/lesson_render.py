@@ -1,4 +1,4 @@
-from .seo import metadata_args
+from .seo import metadata_args, title
 import hashlib
 import json
 import math
@@ -56,7 +56,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     used={l.get('asset_id') for l in plan['lessons'] if l.get('asset_id')}
     hashes={key:hashlib.sha256((folder/'assets'/asset['file']).read_bytes()).hexdigest() for key,asset in project.get('assets',{}).items() if key in used}
     theme=signature();focus=speaker_focus(project,w,h)
-    identity={'seo_title':project.get('title'),'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
+    identity={'seo_title':title(project),'renderer':RENDER_VERSION,'lesson_renderer':LESSON_RENDER_VERSION,'plan':plan,'options':project['options'],'assets':hashes,'template':theme,'preview':preview,'focus':focus,'music':project.get('music_file'),'matting':project.get('matting',{}).get('code') if project['options'].get('background_removal',{}).get('enabled') else None}
     code=digest(identity);render_dir=folder/'renders'/code;render_dir.mkdir(parents=True,exist_ok=True)
     result=render_dir/('preview.mp4' if preview else 'final.mp4');manifest=render_dir/'manifest.json'
     if result.exists() and manifest.exists():return {**json.loads(manifest.read_text(encoding='utf-8')),'revision':project['revision']}
