@@ -6,7 +6,7 @@ export function timelineTime(clientX:number,left:number,width:number,duration:nu
  return frameTime((clientX-left)/Math.max(1,width)*duration,duration);
 }
 export function manualCut(start:number,end:number,duration:number,cuts:CutRange[]){
- const a=Math.ceil(start*30-1e-6)/30,b=Math.floor(end*30+1e-6)/30;
+ const a=Math.ceil(start*30-1e-6)/30+0,b=Math.floor(end*30+1e-6)/30+0;
  if(!Number.isFinite(a)||!Number.isFinite(b)||a<0||b>duration||b-a<1/30-1e-6)throw new Error('Chọn điểm cuối sau điểm đầu ít nhất một khung hình.');
  const intervals=[...cuts.filter(c=>c.enabled),{start:a,end:b}].sort((x,y)=>x.start-y.start);
  let cursor=0,removed=0;

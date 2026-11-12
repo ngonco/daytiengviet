@@ -1,6 +1,10 @@
 import {keepSpans,sourceTime,outputTime,type Span,type Pause,type Range} from './output_timeline';
 
 export type TimelineEdit={cuts:(Range&{id:string;reason:string;locked:boolean})[];pauses:Pause[]};
+// Match backend cut validation before the draft reaches preview or autosave.
+export function normalizeTimelineEdit(edit:TimelineEdit):TimelineEdit{
+ return {...edit,cuts:edit.cuts.map(c=>{const start=Math.ceil(c.start*30-1e-6)/30+0,end=Math.floor(c.end*30+1e-6)/30+0;if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start)throw new Error('\u0110o\u1ea1n c\u1eaft ph\u1ea3i d\u00e0i \u00edt nh\u1ea5t m\u1ed9t khung h\u00ecnh.');return {...c,start,end}})};
+}
 export function clampOutput(time:number,spans:Span[]){return Math.max(0,Math.min(spans.at(-1)?.output_end||0,Number.isFinite(time)?time:0))}
 // Preserve a source frame, or the exact offset within the same inserted hold.
 export function rebaseOutput(time:number,before:Span[],after:Span[]){

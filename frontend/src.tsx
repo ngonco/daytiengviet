@@ -7,12 +7,13 @@ import './style.css';
 import LessonEditor, { type Lesson } from './LessonEditor';
 import LivePreview from './LivePreview';
 import {currentPreview} from './current_preview';
+import {readAutosaveInterval,storeAutosaveInterval,savedDraftState,type SaveStamp} from './autosave';
 import {spaceAction} from './playback_shortcuts';
 import type {PlaybackController} from './pause_playback';
 import {useCutHistory} from './useCutHistory';
 import CutTimeline from './CutTimeline';
 import {insertPause,removeOutputRange,type Pause as Silence,keepSpans,sourceTime as assemblySourceTime,outputTime as assemblyOutputTime} from './output_timeline';
-import {clampOutput,rebaseOutput,timelinePosition,resizePause,type TimelineEdit} from './timeline_state';
+import {clampOutput,rebaseOutput,timelinePosition,resizePause,normalizeTimelineEdit,type TimelineEdit} from './timeline_state';
 import {type VideoFrame} from './editing';
 import TrashPanel from './TrashPanel';
 import ThumbnailEditor from './ThumbnailEditor';
@@ -36,7 +37,7 @@ const clock=(value:number)=>`${Math.floor(value/60).toString().padStart(2,'0')}:
 const precise=(value:number)=>Number(value.toFixed(2));
 async function api<T=any>(path:string,init?:RequestInit):Promise<T>{
   const response=await fetch('/api'+path,init);
-  if(!response.ok){let message=`Không hoàn tất (${response.status})`;try{const body=await response.json();message=typeof body.detail==='string'?body.detail:JSON.stringify(body.detail);}catch{}throw new Error(message);}
+  if(!response.ok){let message=`Không hoàn tất (${response.status})`;try{const body=await response.json();message=typeof body.detail==='string'?body.detail:JSON.stringify(body.detail);}catch{}throw Object.assign(new Error(message),{status:response.status});}
   return response.json();
 }
 const json=(body:unknown,method='POST'):RequestInit=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -54,6 +55,11 @@ function App(){
  const [projects,setProjects]=useState<Project[]>([]),[project,setProject]=useState<Project|null>(null);
  const [draft,setDraft]=useState<Plan|null>(null),[options,setOptions]=useState<Options>(defaults);
  const [dirty,setDirty]=useState(false),dirtyRef=useRef(false);
+ const [autosaveSeconds,setAutosaveSeconds]=useState(readAutosaveInterval);
+ const [autoSaving,setAutoSaving]=useState(false),[lastSaved,setLastSaved]=useState(''),[saveError,setSaveError]=useState('');
+ const draftRevision=useRef<number|null>(null);
+ const saveSession=useRef(0),editVersion=useRef(0),saveFlight=useRef<(SaveStamp&{revision:number})|null>(null),saveBlocked=useRef(false),autoSaveLatest=useRef<()=>Promise<void>>(async()=>{});
+
  const [screen,setScreen]=useState<'studio'|'settings'|'trash'|'automation'>('studio'),[wizard,setWizard]=useState(false);
  const [toast,setToast]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState('');
  const [runtimeWarning,setRuntimeWarning]=useState('');
@@ -66,19 +72,19 @@ function App(){
  const video=useRef<HTMLVideoElement>(null),fileInput=useRef<HTMLInputElement>(null),musicInput=useRef<HTMLInputElement>(null),importInput=useRef<HTMLInputElement>(null);
  const nativeVideo=useRef<HTMLVideoElement|null>(null);
  const attachNativeVideo=useCallback((node:HTMLVideoElement|null)=>{if(nativeVideo.current!==node)nativeVideo.current?.pause();nativeVideo.current=node;video.current=node},[]);
- const projectRef=useRef<Project|null>(null);
+ const projectRef=useRef<Project|null>(project);
  const pendingSourceSeek=useRef<number|null>(null);
  const [sourceSeek,setSourceSeek]=useState<number|null>(null);
  useEffect(()=>{if(sourceSeek!==null&&video.current){video.current.pause();video.current.currentTime=sourceSeek;if(video.current.readyState>=1)pendingSourceSeek.current=null;setSourceSeek(null)}},[sourceSeek,mode]);
  useEffect(()=>{dirtyRef.current=dirty},[dirty]);
  useEffect(()=>{projectRef.current=project},[project]);
- function markDirty(){dirtyRef.current=true;setDirty(true)}
+ function markDirty(){editVersion.current++;dirtyRef.current=true;setDirty(true)}
  function notify(text:string){setToast(text);setTimeout(()=>setToast(''),4500)}
  async function action(name:string,fn:()=>Promise<void>){setPending(name);setError('');try{await fn()}catch(e){setError((e as Error).message)}finally{setPending('')}}
  async function list(){setProjects(await api('/projects'))}
- async function open(id:string,force=false,navigate=true){if(projectRef.current?.id!==id||force){video.current?.pause();setCurrent(0);setPlaying(false);cutHistory.reset();setPreviewDraft(false);setAssemblyCursor(null);setSeekRequest(null);setThumbnailOpen(false);pendingSourceSeek.current=null;setSourceSeek(null)}const p=await api<Project>(`/projects/${id}`);setProject(p);if(force||!dirtyRef.current){setDraft(p.plan?structuredClone({...p.plan,schema_version:p.plan.schema_version||1,lessons:p.plan.lessons||[]}):null);setOptions({...p.options,background_removal:p.options.background_removal||backgroundDefault});setDirty(false);if(force)setTab(p.options.layout_mode==='lesson'?'lessons':'captions')}if(navigate)setScreen('studio');localStorage.setItem('vietcut-project',id);return p;}
+ async function open(id:string,force=false,navigate=true){if(projectRef.current?.id!==id||force){saveSession.current++;saveBlocked.current=false;setLastSaved('');setSaveError('');video.current?.pause();setCurrent(0);setPlaying(false);cutHistory.reset();setPreviewDraft(false);setAssemblyCursor(null);setSeekRequest(null);setThumbnailOpen(false);pendingSourceSeek.current=null;setSourceSeek(null)}const p=await api<Project>(`/projects/${id}`);setProject(p);if(force||!dirtyRef.current){draftRevision.current=p.revision;setDraft(p.plan?structuredClone({...p.plan,schema_version:p.plan.schema_version||1,lessons:p.plan.lessons||[]}):null);setOptions({...p.options,background_removal:p.options.background_removal||backgroundDefault});setDirty(false);if(force)setTab(p.options.layout_mode==='lesson'?'lessons':'captions')}if(navigate)setScreen('studio');localStorage.setItem('vietcut-project',id);return p;}
  useEffect(()=>{list().catch(e=>setError(e.message));const id=localStorage.getItem('vietcut-project');if(id)open(id,true).catch(()=>localStorage.removeItem('vietcut-project'));},[]);
- useEffect(()=>{if(!project?.id||project.trashed)return;const id=project.id;const events=new EventSource(`/api/projects/${id}/events`);events.onmessage=(event)=>{const data=JSON.parse(event.data);if(data.trashed){events.close();setProject(p=>p?.id===id?{...p,trashed:true}:p);list().catch(()=>{});return}const old=projectRef.current;if(!old||old.id!==id)return;const refresh=data.revision!==old.revision||data.status!==old.status||data.preview?.digest!==old.preview?.digest||JSON.stringify(data.jobs.map((j:Job)=>[j.id,j.status]))!==JSON.stringify(old.jobs.map(j=>[j.id,j.status]));setProject(p=>p?.id===id?{...p,...data}:p);if(refresh){open(id,false,false).catch(e=>setError(e.message));list().catch(()=>{})}};return()=>events.close()},[project?.id,project?.trashed]);
+ useEffect(()=>{if(!project?.id||project.trashed)return;const id=project.id;const events=new EventSource(`/api/projects/${id}/events`);events.onmessage=(event)=>{const data=JSON.parse(event.data);if(data.trashed){events.close();setProject(p=>p?.id===id?{...p,trashed:true}:p);list().catch(()=>{});return}const old=projectRef.current;if(!old||old.id!==id)return;const saving=saveFlight.current;if(saving?.projectId===id&&saving.session===saveSession.current&&data.revision===saving.revision+1){setProject(p=>p?.id===id?{...p,jobs:data.jobs,status:data.status,preview:data.preview,export:data.export}:p);return}const refresh=data.revision!==old.revision||data.status!==old.status||data.preview?.digest!==old.preview?.digest||JSON.stringify(data.jobs.map((j:Job)=>[j.id,j.status]))!==JSON.stringify(old.jobs.map(j=>[j.id,j.status]));setProject(p=>p?.id===id?{...p,...data}:p);if(refresh){open(id,false,false).catch(e=>setError(e.message));list().catch(()=>{})}};return()=>events.close()},[project?.id,project?.trashed]);
  useEffect(()=>{setWaveform([]);if(!project?.id||!project.plan||project.trashed)return;const c=new AbortController();api<{peaks:number[]}>(`/projects/${project.id}/waveform`,{signal:c.signal}).then(r=>setWaveform(r.peaks)).catch(()=>{});return()=>c.abort()},[project?.id,!!project?.plan,project?.trashed]);
  const job=project?.jobs?.find(active),busy=!!job||!!project?.trashed||!!pending;
  const lastFailed=project?.jobs?.[0]&&(project.jobs[0].status==='failed'||project.jobs[0].kind==='lesson_photos'&&project.jobs[0].status==='cancelled')?project.jobs[0]:null;
@@ -97,7 +103,35 @@ function App(){
  function changeOptions(changes:Partial<Options>){if(busy)return;setOptions({...options,...changes});dirtyRef.current=true;markDirty()}
  function seek(source:number){if(sourceMode){if(video.current)video.current.currentTime=source;setCurrent(source)}else if(project&&draft)seekOutput(assemblyOutputTime(source,keepSpans(project.metadata.duration,draft.cuts,draft.pauses||[])))}
  function choose(type:typeof tab,id:string,start:number){setTab(type);setSelected(id);seek(start)}
- async function save(){if(!project||!draft)return;await action('save',async()=>{const p=await api<Project>(`/projects/${project.id}/plan`,json({revision:project.revision,plan:draft,options,render_preview:options.layout_mode!=='lesson'},'PUT'));setDirty(false);dirtyRef.current=false;setProject(p);setDraft(p.plan);notify(options.layout_mode==='lesson'?'Đã lưu. Khung xem trực tiếp đã cập nhật.':'Đã lưu. Đang cập nhật bản xem trước.');list()})}
+ async function persist(automatic:boolean){
+  if(!project||!draft||!dirtyRef.current||busy||saveFlight.current||automatic&&saveBlocked.current)return;
+  const sent={projectId:project.id,session:saveSession.current,edit:editVersion.current,revision:draftRevision.current??project.revision};
+  saveFlight.current=sent;if(automatic)setAutoSaving(true);else setPending('save');setSaveError('');
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),20000);
+  try{
+   const result=await api<Project>(`/projects/${sent.projectId}/plan`,{...json({revision:sent.revision,plan:draft,options,render_preview:options.layout_mode!=='lesson'},'PUT'),signal:controller.signal});
+   const currentProject=projectRef.current;
+   const state=savedDraftState(sent,{projectId:currentProject?.id||'',session:saveSession.current,edit:editVersion.current});
+   if(state==='ignore')return;
+   if(currentProject&&currentProject.revision>result.revision){saveBlocked.current=true;setSaveError('D\u1ef1 \u00e1n \u0111\u00e3 \u0111\u1ed5i \u1edf c\u1eeda s\u1ed5 kh\u00e1c. B\u1ea3n nh\u00e1p c\u1ee7a b\u1ea1n v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef.');return}
+   const merged={...currentProject,...result,assets:{...result.assets,...currentProject?.assets},jobs:automatic?currentProject?.jobs||result.jobs:result.jobs};
+   draftRevision.current=result.revision;projectRef.current=merged;setProject(merged);
+   if(state==='clean'){dirtyRef.current=false;setDirty(false)}
+   // Keep the local plan/options and cursor: normalized save echoes must not rebuild playback.
+   setLastSaved(new Date().toLocaleTimeString('vi-VN'));setSaveError('');saveBlocked.current=false;
+   setProjects(items=>items.map(p=>p.id===result.id?{...p,revision:result.revision,updated_at:result.updated_at,options:result.options}:p));
+   if(!automatic)notify('\u0110\u00e3 l\u01b0u ch\u1ec9nh s\u1eeda.');
+  }catch(e){
+   if(sent.session!==saveSession.current)return;
+   const message=(e as Error).name==='AbortError'?'L\u01b0u qu\u00e1 th\u1eddi gian ch\u1edd; b\u1ea3n nh\u00e1p v\u1eabn \u0111\u01b0\u1ee3c gi\u1eef.':(e as Error).message;
+   if((e as {status?:number}).status===409)saveBlocked.current=true;
+   setSaveError(message);if(!automatic)setError(message);
+  }finally{clearTimeout(timeout);if(saveFlight.current===sent)saveFlight.current=null;if(automatic)setAutoSaving(false);else setPending(value=>value==='save'?'':value)}
+ }
+ function save(){return persist(false)}
+ autoSaveLatest.current=()=>persist(true);
+ useEffect(()=>{if(!project?.id)return;const timer=setInterval(()=>autoSaveLatest.current(),autosaveSeconds*1000);return()=>clearInterval(timer)},[project?.id,autosaveSeconds]);
+
  async function startJob(kind:string){if(!project)return;await action(kind,async()=>{await api(kind==='reframe'?`/projects/${project.id}/reframe`:`/projects/${project.id}/jobs/${kind}`,{method:'POST'});await open(project.id);if(kind==='export')notify('Đang xuất bản chất lượng cao. Bạn có thể theo dõi tiến độ bên dưới.')})}
  function switchProject(id:string){if(dirty&&!window.confirm('Bạn có chỉnh sửa chưa lưu. Chuyển dự án và bỏ các chỉnh sửa này?'))return;setDirty(false);dirtyRef.current=false;setSelected('');setCurrent(0);action('open',async()=>{await open(id,true)})}
  function addVisual(){if(!draft||!project)return;const id='manual-'+Date.now();const start=Math.min(Math.max(0,sourceTime),project.metadata.duration-.2);const v:Visual={id,start:precise(start),end:precise(Math.min(start+3,project.metadata.duration)),kind:'vocab',layout:'card',query:'',text:'Từ vựng mới',translation:'New vocabulary',asset_id:null,enabled:true,locked:true,x:null,y:null,scale:1};setDraft({...draft,visuals:[...draft.visuals,v]});setSelected(id);setTab('visuals');markDirty()}
@@ -109,6 +143,7 @@ function App(){
  function applyTimeline(edit:TimelineEdit,position?:number,record=true){
   if(!draft||!project||busy)return false;
   try{
+   edit=normalizeTimelineEdit(edit);
    const before=keepSpans(project.metadata.duration,draft.cuts,draft.pauses||[]),after=keepSpans(project.metadata.duration,edit.cuts,edit.pauses);
    const old=sourceMode?assemblyOutputTime(current,before):assemblyCursor??assemblyOutputTime(current,before);
    const next=timelinePosition(project.metadata.duration,edit,position??rebaseOutput(old,before,after));
@@ -175,9 +210,9 @@ function App(){
    {options.layout_mode==='legacy'&&draft&&<div className="reframe-banner"><div><b>Khung bài học · Vietnamese with Vinh</b><p>Giữ từ/câu và ảnh suốt mục bài học. Bản hiện tại được lưu trong lịch sử.</p></div><button className="primary" disabled={busy||dirty||!!pending} onClick={()=>startJob('reframe')}><WandSparkles size={15}/> Chuyển sang khung bài học</button></div>}
    <input hidden ref={fileInput} type="file" accept="image/*" onChange={e=>{if(e.target.files?.[0])uploadImage(e.target.files[0]);e.target.value=''}}/>
    {(project.export||project.preview)&&<section className="downloads panel"><div><CheckCircle2 size={20}/><span><b>{project.export?'Bản xuất đã sẵn sàng':'Bản nháp đã sẵn sàng'}</b><small>{project.export?`${project.export.width} × ${project.export.height} · ${clock(project.export.duration)}`:'Bạn có thể tải bản nháp hoặc xuất chất lượng cao.'}{(project.export||project.preview)!.revision!==project.revision?' · Thuộc phiên bản cũ':''}{project.export?.published_file&&<span className="published-path">Đã lưu cạnh nguồn: {project.export.published_file}</span>}</small></span></div><div>{[['video','Video MP4'],['vi','SRT Việt'],['en','SRT Anh'],['project','Dự án ZIP']].map(([kind,label])=><a className="secondary" key={kind} href={`/api/projects/${project.id}/download/${kind}`} download><Download size={14}/>{label}</a>)}</div></section>}
-   <div className="recut-toolbar"><label>Cường độ cắt<select value={options.cut_strength||'strong'} disabled={busy} onChange={e=>changeOptions({cut_strength:e.target.value as 'light'|'medium'|'strong'})}><option value="light">Nhẹ</option><option value="medium">Vừa</option><option value="strong">Mạnh</option></select></label><button className="secondary" disabled={busy||dirty||!draft} onClick={()=>startJob('recut')}>Chạy lại cắt tự động</button><button className="primary" disabled={!dirty||busy||!!pending} onClick={save}>Lưu chỉnh sửa</button><small>{dirty?'Lưu trước khi chạy lại cắt hoặc xuất.':'Giữ lượt luyện nói · Sau khi cắt có thể hoàn tác hoặc khôi phục đoạn.'}</small></div>
+   <div className="recut-toolbar"><label>Cường độ cắt<select value={options.cut_strength||'strong'} disabled={busy} onChange={e=>changeOptions({cut_strength:e.target.value as 'light'|'medium'|'strong'})}><option value="light">Nhẹ</option><option value="medium">Vừa</option><option value="strong">Mạnh</option></select></label><button className="secondary" disabled={busy||dirty||!draft} onClick={()=>startJob('recut')}>Chạy lại cắt tự động</button><button className="primary" disabled={!dirty||busy||!!pending||autoSaving} onClick={save}>Lưu chỉnh sửa</button><small>{dirty?'Lưu trước khi chạy lại cắt hoặc xuất.':'Giữ lượt luyện nói · Sau khi cắt có thể hoàn tác hoặc khôi phục đoạn.'}</small></div>
    <section className="editing-dock">
-   <EditorWorkspace actions={<><button className="primary" disabled={!dirty||busy||!!pending} onClick={save}>Lưu</button><button className="secondary" disabled={!draft||dirty||busy||!!pending} onClick={()=>startJob('export')}>Xuất video</button></>} onInspectorHost={setInspectorHost} hasSelection={!!selectedItem||!!selectedLesson}>
+   <EditorWorkspace actions={<><button className="primary" disabled={!dirty||busy||!!pending||autoSaving} onClick={save}>Lưu</button><button className="secondary" disabled={!draft||dirty||busy||!!pending} onClick={()=>startJob('export')}>Xuất video</button><div className="autosave-controls"><label>{'T\u1ef1 \u0111\u1ed9ng l\u01b0u'}<select aria-label={'Chu k\u1ef3 t\u1ef1 \u0111\u1ed9ng l\u01b0u'} value={autosaveSeconds} onChange={e=>setAutosaveSeconds(storeAutosaveInterval(Number(e.target.value)))}>{Array.from({length:16},(_,i)=>i+5).map(seconds=><option key={seconds} value={seconds}>{seconds}{' gi\u00e2y'}</option>)}</select></label><span className={saveError?'autosave-error':''} role="status" aria-live="polite">{saveError?'Ch\u01b0a l\u01b0u: '+saveError:autoSaving?'\u0110ang t\u1ef1 l\u01b0u...':dirty?'Ch\u1edd t\u1ef1 l\u01b0u...':lastSaved?'\u0110\u00e3 l\u01b0u '+lastSaved:'T\u1ef1 l\u01b0u m\u1ed7i '+autosaveSeconds+' gi\u00e2y'}</span></div></>} onInspectorHost={setInspectorHost} hasSelection={!!selectedItem||!!selectedLesson}>
     <section className="preview-panel panel">
      <div className="panel-top"><div className="panel-title"><Film size={16}/> KHUNG XEM TRƯỚC</div><div className="segmented"><button className={sourceMode?'on':''} onClick={()=>{video.current?.pause();setMode('source');setCurrent(0);setAssemblyCursor(0)}}>Bản gốc</button><button className={!sourceMode?'on':''} disabled={!render&&!draft?.lessons?.length} onClick={()=>seekOutput(0)}>Bản dựng</button>{!dirty&&!sourceMode&&currentPreview(project.revision,false,project.export,project.preview)&&<button className={previewDraft?'on':''} disabled={dirty&&previewDraft} onClick={()=>{video.current?.pause();pendingSourceSeek.current=null;setSourceSeek(null);setPlaying(false);setSeekRequest(null);setPreviewDraft(v=>!v)}}>{previewDraft?'Xem MP4 đã lưu':'Chỉnh trực tiếp'}</button>}</div></div>
      {isLive&&draft?<LivePreview controllerRef={playbackController} seekRequest={seekRequest} onOutputTime={setAssemblyCursor} initialOutput={assemblyCursor??assemblyOutputTime(current,keepSpans(project.metadata.duration,draft.cuts,draft.pauses||[]))} key={project.id} onSizeChange={size=>changeOptions({speaker_size:size})} onLayoutChange={landscape_layout=>changeOptions({landscape_layout})} onFrameChange={(key,frame)=>changeOptions({video_frames:{...options.video_frames,[key]:frame}})} project={project} plan={draft} options={options} videoRef={video} busy={busy} dirty={dirty} onTime={setCurrent} onPlay={setPlaying} onPrepare={()=>startJob('prepare_speaker')}/>:<div className={`video-stage ${(sourceMode?project.metadata.height>project.metadata.width:render!.height>render!.width)?'vertical':''}`}>
@@ -202,10 +237,10 @@ function App(){
       {selectedCut&&<><label>Lý do<textarea value={selectedCut.reason} onChange={e=>changePlan('cuts',selectedCut.id,{reason:e.target.value,locked:true})}/></label><label className="check-label"><input type="checkbox" checked={selectedCut.enabled} onChange={e=>changePlan('cuts',selectedCut.id,{enabled:e.target.checked,locked:true})}/> Bỏ đoạn này khỏi bản dựng</label><button className="text-button" onClick={()=>{setMode('source');setTimeout(()=>{if(video.current){video.current.currentTime=selectedCut.start;video.current.play()}},100)}}><Volume2 size={14}/> Nghe đoạn gốc</button></>}
       <label className="check-label lock"><input type="checkbox" checked={selectedItem.locked} onChange={e=>changePlan(tab,selectedItem.id,{locked:e.target.checked})}/><LockKeyhole size={13}/> Khóa đoạn khi AI dựng lại</label>
      </fieldset></div>,inspectorHost)}
-     <div className="content-bottom"><span>{dirty?(options.layout_mode==='lesson'?'Đang xem chỉnh sửa chưa lưu':'Chỉnh sửa chưa áp dụng vào bản xem trước'):'Bạn có thể sửa mọi quyết định của AI'}</span><button className="primary" disabled={!dirty||busy||!!pending} onClick={save}>{pending==='save'?<Loader2 className="spin" size={15}/>:<Save size={15}/>} {options.layout_mode==='lesson'?'Lưu':'Lưu & dựng lại'}</button></div>
+     <div className="content-bottom"><span>{dirty?(options.layout_mode==='lesson'?'Đang xem chỉnh sửa chưa lưu':'Chỉnh sửa chưa áp dụng vào bản xem trước'):'Bạn có thể sửa mọi quyết định của AI'}</span><button className="primary" disabled={!dirty||busy||!!pending||autoSaving} onClick={save}>{pending==='save'?<Loader2 className="spin" size={15}/>:<Save size={15}/>} {options.layout_mode==='lesson'?'Lưu':'Lưu & dựng lại'}</button></div>
     </section>
    </EditorWorkspace>
-   <CutTimeline pauses={draft?.pauses||[]} assemblyTime={!sourceMode?assemblyCursor:null} onSeekOutput={seekOutput} onInsertSilence={insertSilence} onChangePause={(id,seconds)=>{if(!draft)return;try{editPauses(resizePause(draft.pauses||[],id,seconds))}catch(e){setError((e as Error).message)}}} onRemovePause={id=>editPauses((draft?.pauses||[]).filter(p=>p.id!==id))} onCutOutput={cutOutput} silenceEnabled={options.layout_mode==='lesson'} waveform={waveform} canUndo={cutHistory.canUndo} canRedo={cutHistory.canRedo} onUndo={()=>restoreCuts()} onRedo={()=>restoreCuts(true)} frames={(project.frames||[]).map(f=>({time:f.time,url:media(project.id,f.file)}))} key={project.id} duration={project.metadata.duration} time={sourceTime} cuts={draft?.cuts||[]} clips={[...(draft?.captions||[]).map(c=>({...c,text:c.vi,kind:'captions' as const})),...(draft?.visuals||[]).filter(v=>v.enabled).map(v=>({...v,text:v.text,kind:'visuals' as const})),...(draft?.lessons||[]).map(l=>({...l,text:l.vi,kind:'lessons' as const}))]} onSelect={c=>{setTab(c.kind);setSelected(c.id);seekAssembly(c.start)}} disabled={!draft||busy} playing={playing} onPlay={togglePlayback} onPreview={()=>seekOutput(0)} onHistory={()=>action('history',async()=>{setVersions(await api(`/projects/${project.id}/versions`));setHistory(true)})} onToggle={(id,enabled)=>changePlan('cuts',id,{enabled,locked:true})}/>
+   <CutTimeline shortcutsEnabled={screen==='studio'&&!wizard&&!history&&!photoSearch&&!thumbnailOpen} pauses={draft?.pauses||[]} assemblyTime={!sourceMode?assemblyCursor:null} onSeekOutput={seekOutput} onInsertSilence={insertSilence} onChangePause={(id,seconds)=>{if(!draft)return;try{editPauses(resizePause(draft.pauses||[],id,seconds))}catch(e){setError((e as Error).message)}}} onRemovePause={id=>editPauses((draft?.pauses||[]).filter(p=>p.id!==id))} onCutOutput={cutOutput} silenceEnabled={options.layout_mode==='lesson'} waveform={waveform} canUndo={cutHistory.canUndo} canRedo={cutHistory.canRedo} onUndo={()=>restoreCuts()} onRedo={()=>restoreCuts(true)} frames={(project.frames||[]).map(f=>({time:f.time,url:media(project.id,f.file)}))} key={project.id} duration={project.metadata.duration} time={sourceTime} cuts={draft?.cuts||[]} clips={[...(draft?.captions||[]).map(c=>({...c,text:c.vi,kind:'captions' as const})),...(draft?.visuals||[]).filter(v=>v.enabled).map(v=>({...v,text:v.text,kind:'visuals' as const})),...(draft?.lessons||[]).map(l=>({...l,text:l.vi,kind:'lessons' as const}))]} onSelect={c=>{setTab(c.kind);setSelected(c.id);seekAssembly(c.start)}} disabled={!draft||busy} playing={playing} onPlay={togglePlayback} onPreview={()=>seekOutput(0)} onHistory={()=>action('history',async()=>{setVersions(await api(`/projects/${project.id}/versions`));setHistory(true)})} onToggle={(id,enabled)=>changePlan('cuts',id,{enabled,locked:true})}/>
    </section>
 
    <MattingPanel id={project.id} source={(project as any).source_file} duration={project.metadata.duration} time={sourceTime} value={options.background_removal||backgroundDefault} result={(project as any).matting} busy={busy} dirty={dirty} onChange={background_removal=>changeOptions({background_removal})}/>

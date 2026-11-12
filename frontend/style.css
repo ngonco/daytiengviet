@@ -71,3 +71,7 @@
 .manual-timeline .cut-timeline-canvas{user-select:none}
 .manual-timeline .cut-selection{top:48px;height:76px}
 .editing-dock .manual-timeline .cut-selection{top:36px;height:64px}
+
+.autosave-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-left:auto}.autosave-controls label{flex-direction:row;align-items:center;gap:6px;white-space:nowrap}.autosave-controls select{width:80px;padding:5px}.autosave-controls [role=status]{font-size:10px;color:var(--muted);max-width:300px}.autosave-controls .autosave-error[role=status]{color:var(--red)}
+
+.workspace-tools{flex-wrap:wrap}.autosave-controls{max-width:100%}

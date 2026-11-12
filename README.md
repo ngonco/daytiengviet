@@ -176,3 +176,13 @@ Chạy `KHOI_DONG_LAI_VIETCUT.cmd` sẽ tự kiểm tra thay đổi mã nguồn/
 - Không tự đổi nhánh, pull/merge hoặc force-push. Nếu có xung đột, sai kho, file staged ngoài phạm vi hoặc quét khóa API không đạt, phần đồng bộ sẽ dừng và báo rõ.
 - Mất mạng, hết phiên đăng nhập GitHub hoặc thiếu quyền Git: commit đã tạo vẫn được giữ. VietCut vẫn thử khởi động lại; cửa sổ CMD giữ thông báo lỗi để xem. Không tự mở hộp thoại đăng nhập.
 - Cần Git đã cài, thông tin tác giả Git đã thiết lập và quyền push hiện có. Lưu chỉnh sửa đang mở trong app trước khi khởi động lại.
+
+
+### Delete và tự động lưu
+
+- Chọn đoạn trên timeline rồi bấm **Delete** để bỏ đoạn và tự nối phần còn lại. Phím vẫn hoạt động khi chuyển con trỏ sang khu preview; không can thiệp khi đang nhập chữ/số hoặc mở hộp thoại. Có thể Hoàn tác sau khi xóa.
+- **Tự động lưu** nằm cạnh nút Lưu/Xuất: mặc định **10 giây**, chọn từ **5 đến 20 giây**. Lựa chọn được nhớ trên trình duyệt này.
+- Chỉ gửi lưu khi có thay đổi và dự án không bận. Bản dựng bài học vẫn phát trong lúc lưu nền; có thể cắt/chỉnh tiếp. Trạng thái hiển thị đang lưu, giờ lưu gần nhất hoặc lỗi; lỗi không làm mất bản nháp. Khi có xung đột với cửa sổ khác, tự lưu tạm dừng để tránh ghi đè.
+- Tự lưu lưu chỉnh sửa dự án; vẫn bấm **Xuất video** khi cần MP4 mới.
+
+- Phím **I** chèn im lặng tại đầu phát, dùng số giây đang chọn trên timeline (mặc định 2 giây). Bấm nhiều lần riêng biệt để cộng dồn; giữ phím không chèn liên tục. Không kích hoạt khi nhập chữ/số, gõ IME, mở hộp thoại hoặc dự án đang bận.

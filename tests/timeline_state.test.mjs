@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {registerHooks} from 'node:module';
 registerHooks({resolve(specifier,context,next){if(specifier==='./output_timeline'&&context.parentURL?.endsWith('/timeline_state.ts'))specifier='./output_timeline.ts';return next(specifier,context)}});
-const {clampOutput,rebaseOutput,timelinePosition,resizePause}=await import('../frontend/timeline_state.ts');
+const {clampOutput,rebaseOutput,timelinePosition,resizePause,normalizeTimelineEdit}=await import('../frontend/timeline_state.ts');
 import {keepSpans,removeOutputRange,insertPause} from '../frontend/output_timeline.ts';
 const cut=(start,end)=>({id:`cut-${start}`,start,end,enabled:true,reason:'test',locked:true});
 test('cut transaction uses the new assembly at a join, clamps tail deletion and rejects removal of all source',()=>{
@@ -29,4 +29,10 @@ test('mixed source/hold removal, cumulative insertion and history snapshots pres
  const edit=removeOutputRange(10,original.cuts,original.pauses,2.5,4);
  assert.equal(edit.pauses[0].duration,1);assert.ok(Math.abs(keepSpans(10,edit.cuts,edit.pauses).at(-1).output_end-(before.at(-1).output_end-1.5))<1e-8);
  assert.deepEqual(original,snapshot);assert.equal(insertPause(original.pauses,4)[0].duration,4);
+});
+
+test('draft cuts align inward before preview/autosave so a save echo does not change playback spans',()=>{
+ const edit={cuts:[cut(1.05,2.05)],pauses:[]},normalized=normalizeTimelineEdit(edit);
+ assert.equal(normalized.cuts[0].start,32/30);assert.equal(normalized.cuts[0].end,61/30);assert.equal(edit.cuts[0].start,1.05);
+ assert.throws(()=>normalizeTimelineEdit({cuts:[cut(1,1.001)],pauses:[]}));
 });
