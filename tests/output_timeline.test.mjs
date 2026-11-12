@@ -18,3 +18,17 @@ test('source/output roundtrip at retained frames agrees after overlapping source
  const spans=keepSpans(15,[{start:0,end:1,enabled:true},{start:3,end:5,enabled:true},{start:12,end:15,enabled:true}]);
  for(let frame=0;frame<9*30;frame++){const output=frame/30;assert.ok(Math.abs(outputTime(sourceTime(output,spans),spans)-output)<1e-8);}
 });
+
+test('dense source and silence maps share exactly identical adjacent output endpoints',()=>{
+ const cuts=Array.from({length:58},(_,i)=>({start:(i*100+13)/30,end:(i*100+52)/30,enabled:true}));
+ for(const pauses of [[],[{id:'p',at:337/30,duration:2}]]){
+  const spans=keepSpans(205.252729,cuts,pauses);
+  for(let i=1;i<spans.length;i++)assert.equal(spans[i].output_start,spans[i-1].output_end,`join ${i} must be EXACTLY contiguous`);
+  if(!pauses.length)for(const span of spans)assert.equal(outputTime(span.end,spans),span.output_end);
+ }
+});
+
+test('legacy maps with an internal floating-point hole select the next retained source rather than the tail',()=>{
+ const eps=Number.EPSILON*8,legacy=[{start:0,end:1,output_start:0,output_end:1},{start:5,end:6,output_start:1+eps,output_end:2+eps},{start:10,end:20,output_start:2+eps,output_end:12+eps}];
+ assert.equal(sourceTime(1,legacy),5);assert.equal(sourceTime(-1,legacy),0);assert.equal(sourceTime(100,legacy),20);
+});

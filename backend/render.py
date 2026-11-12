@@ -58,7 +58,8 @@ def escape_ass(text):
     return text.replace('\\', '／').replace('{', '(').replace('}', ')').replace('\r', '').replace('\n', r'\N')
 
 def mapped_captions(project, plan):
-    spans = keep_spans(project['metadata']['duration'], plan['cuts'])
+    from .timeline import assembly_spans
+    spans = assembly_spans(project['metadata']['duration'], plan['cuts'],plan.get('pauses',[]))
     return [{**c, 'output_start': a, 'output_end': b} for c in plan['captions'] for a,b in map_interval(c['start'],c['end'],spans)]
 
 def write_srt(project, plan, folder):
@@ -222,6 +223,7 @@ def render(project, plan, transcript, context, preview=True):
     if project['options'].get('layout_mode','legacy')=='lesson':
         from .lesson_render import render_lessons
         return render_lessons(project,plan,transcript,context,preview)
+    if plan.get('pauses'):raise ValueError('Chuyển sang khung bài học để xuất các khoảng im lặng đã chèn.')
     folder=context.folder
     w,h=dimensions(project,preview)
     spans=keep_spans(project['metadata']['duration'],plan['cuts'])

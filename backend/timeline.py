@@ -73,10 +73,17 @@ class Lesson(Timed):
             raise ValueError('Bộ ảnh không được chứa ảnh trùng.')
         return self
 
+class Pause(BaseModel):
+    model_config=ConfigDict(extra='forbid',allow_inf_nan=False)
+    id: str=Field(min_length=1,max_length=100)
+    at: float=Field(ge=0)
+    duration: float=Field(gt=0,le=600)
+
 class Plan(BaseModel):
     model_config = ConfigDict(extra='ignore')
     summary: str = ''
     glossary: list[dict[str, str]] = Field(default_factory=list, max_length=300)
+    pauses: list[Pause]=Field(default_factory=list,max_length=1000)
     cuts: list[Cut] = Field(default_factory=list, max_length=5000)
     captions: list[Caption] = Field(default_factory=list, max_length=10000)
     visuals: list[Visual] = Field(default_factory=list, max_length=1500)
@@ -85,6 +92,13 @@ class Plan(BaseModel):
 
 def validate_plan(raw, duration):
     plan = Plan.model_validate(raw).model_dump()
+    ids=set()
+    for pause in plan['pauses']:
+        if pause['id'] in ids or pause['at']>duration:raise ValueError('Khoảng im lặng không hợp lệ hoặc trùng mã.')
+        ids.add(pause['id'])
+        pause['at']=duration if pause['at']>=duration-1e-6 else min(duration,round(pause['at']*30)/30)
+        pause['duration']=max(1/30,round(pause['duration']*30)/30)
+    if sum(p['duration'] for p in plan['pauses'])>3600:raise ValueError('Tổng thời gian chèn tối đa 60 phút.')
     # Inward frame alignment prevents cumulative A/V drift across many small cuts.
     for cut in plan['cuts']:
         cut['start'] = math.ceil(cut['start']*30-1e-6)/30
@@ -124,8 +138,9 @@ def keep_spans(duration, cuts):
     result, cursor, out = [], 0.0, 0.0
     for start, end in merged + [[duration, duration]]:
         if start > cursor + 0.001:
-            result.append({'start': cursor, 'end': start, 'output_start': out, 'output_end': out + start - cursor})
-            out += start - cursor
+            output_end = out + (start - cursor)
+            result.append({'start': cursor, 'end': start, 'output_start': out, 'output_end': output_end})
+            out = output_end
         cursor = max(cursor, end)
     return result
 
@@ -134,13 +149,13 @@ def map_interval(start, end, spans):
     for span in spans:
         a, b = max(start, span['start']), min(end, span['end'])
         if b > a + 0.005:
-            result.append((span['output_start'] + a - span['start'], span['output_start'] + b - span['start']))
+            result.append((span['output_start'] + (a - span['start']), span['output_start'] + (b - span['start'])))
     return result
 
 def source_to_output(value, spans):
     for s in spans:
         if s['start'] <= value <= s['end']:
-            return s['output_start'] + value - s['start']
+            return s['output_start'] + (value - s['start'])
     for s in spans:
         if s['start'] > value:
             return s['output_start']
@@ -148,8 +163,9 @@ def source_to_output(value, spans):
 
 def output_to_source(value, spans):
     for s in spans:
-        if s['output_start'] <= value < s['output_end']:
-            return s['start'] + value - s['output_start']
+        # Internal holes in older maps select the following span, never the tail.
+        if value < s['output_end']:
+            return s['start'] if s.get('kind')=='pause' else s['start'] + max(0,value - s['output_start'])
     return spans[-1]['end'] if spans else 0
 
 def cue_words(words):
@@ -168,3 +184,27 @@ def cue_words(words):
             flush()
     flush()
     return cues
+
+
+def assembly_spans(duration,cuts,pauses=()):
+    base=keep_spans(duration,cuts)
+    if not pauses:return base
+    total=base[-1]['output_end'];events={}
+    for p in pauses:
+        point=source_to_output(p['at'],base)
+        events.setdefault(point,[]).append(p)
+    points=sorted(set([0,total,*events,*[s['output_start'] for s in base],*[s['output_end'] for s in base]]))
+    result=[];out=0
+    for i,point in enumerate(points):
+        if point in events:
+            # Freeze the preceding retained frame, including at a cut join or end.
+            freeze=output_to_source(max(0,point-1/30),base)
+            for p in sorted(events[point],key=lambda p:p['id']):
+                result.append({'start':freeze,'end':freeze,'output_start':out,'output_end':out+p['duration'],'kind':'pause','pause_id':p['id']});out+=p['duration']
+        if i+1<len(points):
+            end=points[i+1]
+            if end-point>1e-8:
+                source=output_to_source(point,base)
+                length=end-point;output_end=out+length
+                result.append({'start':source,'end':source+length,'output_start':out,'output_end':output_end});out=output_end
+    return result

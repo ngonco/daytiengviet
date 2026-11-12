@@ -11,6 +11,18 @@ from backend.media import ffmpeg,probe
 from backend.live_preview import scene
 
 class AssemblyEditorTests(unittest.TestCase):
+    def test_new_projects_use_circle_even_with_stale_client_defaults(self):
+        from backend.app import create
+        for supplied in [{}, {'landscape_layout':'classic'}, {'landscape_layout':'circle'}]:
+            with self.subTest(supplied=supplied),TemporaryDirectory() as tmp,patch('backend.store.data_root',return_value=Path(tmp)):
+                store.init();source=Path(tmp)/'input.mp4';source.write_bytes(b'test source')
+                with patch('backend.app.probe',return_value={'duration':10,'width':1920,'height':1080}):
+                    created=create(source,'Test',Options(ratio='16:9',layout_mode='lesson',**supplied))
+                self.assertEqual(created['options']['landscape_layout'],'circle')
+                self.assertFalse(created['options']['background_removal']['enabled'])
+                self.assertEqual(source.read_bytes(),b'test source')
+        self.assertEqual(Options.model_validate({'layout_mode':'lesson'}).landscape_layout,'classic')
+
     def test_circle_size_and_non_overlapping_teaching_regions(self):
         for size in [.15,.25,.4]:
             opts=Options(ratio='16:9',landscape_layout='circle',speaker_size=size).model_dump()

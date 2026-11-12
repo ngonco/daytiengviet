@@ -136,11 +136,11 @@ class FolderTests(unittest.TestCase):
         p,folder=self.project();p.pop('export');p['title_mode']='auto';store.save(p)
         source=self.input();code=automation.digest(source)
         job=store.job_create(p['id'],'pipeline',{'automation_hash':code})
-        with patch('backend.worker.extract_frames',return_value=[]),patch('backend.worker.transcribe',return_value={}),patch('backend.worker.prepared_render',return_value={'file':'result.mp4','duration':10}) as render,patch('backend.automation.publish'):
+        with patch('backend.recut.recut',side_effect=lambda project,context: project['plan']),patch('backend.worker.extract_frames',return_value=[]),patch('backend.worker.transcribe',return_value={}),patch('backend.worker.prepared_render',return_value={'file':'result.mp4','duration':10}) as render,patch('backend.automation.publish'):
             worker.execute(job);self.assertFalse(render.call_args.args[-1]);self.assertEqual(store.read(p['id'])['title'],'Có')
         store.job_update(job['id'],status='succeeded');p=store.read(p['id']);p.pop('title_mode');p['title']='Old title';store.save(p)
         job=store.job_create(p['id'],'pipeline')
-        with patch('backend.worker.extract_frames',return_value=[]),patch('backend.worker.transcribe',return_value={}),patch('backend.worker.prepared_render',return_value={}) as render:
+        with patch('backend.recut.recut',side_effect=lambda project,context: project['plan']),patch('backend.worker.extract_frames',return_value=[]),patch('backend.worker.transcribe',return_value={}),patch('backend.worker.prepared_render',return_value={}) as render:
             worker.execute(job);self.assertTrue(render.call_args.args[-1]);self.assertEqual(store.read(p['id'])['title'],'Old title')
 
     def test_real_folder_pipeline_publishes_decodable_full_hd_once(self):

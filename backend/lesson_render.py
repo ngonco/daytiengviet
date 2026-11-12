@@ -4,12 +4,12 @@ import hashlib
 import json
 import math
 from PIL import Image,ImageDraw
-from .timeline import keep_spans,map_interval
+from .timeline import keep_spans,map_interval,assembly_spans
 from .media import ffmpeg
 from .store import atomic_json
 from .templates import geometry,signature,make_frame,rounded_mask,speaker_transform,speaker_filter,font,fit_text,subtitle_region,subtitle_position
 
-LESSON_RENDER_VERSION=7
+LESSON_RENDER_VERSION=9
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -53,7 +53,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     if not plan.get('lessons'):
         raise ValueError('Dự án cần có ít nhất một mục bài học. Hãy chọn Chuyển sang khung bài học.')
     folder=context.folder;w,h=dimensions(project,preview);g=geometry(w,h,project['options'])
-    spans=keep_spans(project['metadata']['duration'],plan['cuts']);duration=spans[-1]['output_end']
+    spans=assembly_spans(project['metadata']['duration'],plan['cuts'],plan.get('pauses',[]));duration=spans[-1]['output_end']
     used={l.get('asset_id') for l in plan['lessons'] if l.get('asset_id')}
     hashes={key:hashlib.sha256((folder/'assets'/asset['file']).read_bytes()).hexdigest() for key,asset in project.get('assets',{}).items() if key in used}
     theme=signature();focus=speaker_transform(project,w,h)
@@ -78,25 +78,33 @@ def render_lessons(project,plan,transcript,context,preview=True):
         page_paths[lesson['id']]=path
     sx,sy,cw,ch=g['speaker'];mask_path=tile_dir/f'mask-{cw}-{ch}-{g.get("speaker_radius",g["radius"])}.png'
     if not mask_path.exists():rounded_mask((cw,ch),g.get('speaker_radius',g['radius'])).save(mask_path)
-    source=folder/project.get('render_source_file',project['source_file']);count=math.ceil(duration/20);chunks=[]
+    source=folder/project.get('render_source_file',project['source_file'])
+    # Bound decoder/filter fan-in when aggressive cuts create many short spans.
+    chunk_seconds=5 if len(spans)>20 else 20
+    count=math.ceil(duration/chunk_seconds);chunks=[]
     for index in range(count):
         context.progress((78 if context.kind in ['pipeline','revise','reframe'] else 2)+(18 if context.kind in ['pipeline','revise','reframe'] else 90)*index/count,f"{'Dựng khung bài học' if preview else 'Xuất khung bài học'} · đoạn {index+1}/{count}")
-        context.check();start=index*20;end=min(duration,start+20);length=end-start
+        context.check();start=index*chunk_seconds;end=min(duration,start+chunk_seconds);length=end-start
         local_lessons=[l for l in lessons if l['output_end']>start and l['output_start']<end]
         local_captions=[c for c in captions if c['output_end']>start and c['output_start']<end]
         pieces=[]
         for span in spans:
             a,b=max(start,span['output_start']),min(end,span['output_end'])
-            if b>a+.001:pieces.append({'start':span['start']+a-span['output_start'],'duration':b-a})
+            if b>a+.001:pieces.append({'start':span['start'] if span.get('kind')=='pause' else span['start']+a-span['output_start'],'duration':b-a,'pause':span.get('kind')=='pause'})
         chunk_key=digest({'v':LESSON_RENDER_VERSION,'renderer':RENDER_VERSION,'theme':theme,'size':[w,h],'geometry':g,'pieces':pieces,'lessons':local_lessons,'captions':local_captions,'assets':hashes,'focus':focus,'start':start,'matting':identity['matting']})
         cache=folder/'render-cache'/chunk_key;cache.mkdir(parents=True,exist_ok=True)
         chunk=cache/'chunk.mkv';chunks.append(chunk)
         if chunk.exists() and (cache/'complete.json').exists():continue
         args=[];filters=[]
         for i,piece in enumerate(pieces):
-            args+=['-ss',piece['start'],'-t',piece['duration'],'-i',source]
-            filters.append(f'[{i}:v]setpts=PTS-STARTPTS,fps=30,setsar=1,format=yuv420p[v{i}]')
-            filters.append(f'[{i}:a]atrim=duration={piece["duration"]},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.008,afade=t=out:st={max(0,piece["duration"]-.008)}:d=0.008[a{i}]')
+            if piece.get('pause'):
+                args+=['-ss',piece['start'],'-t',1/30,'-i',source]
+                filters.append(f'[{i}:v]setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop_duration={piece["duration"]},trim=duration={piece["duration"]},setsar=1,format=yuv420p[v{i}]')
+                filters.append(f'anullsrc=r=48000:cl=stereo,atrim=duration={piece["duration"]},asetpts=PTS-STARTPTS[a{i}]')
+            else:
+                args+=['-ss',piece['start'],'-t',piece['duration'],'-i',source]
+                filters.append(f'[{i}:v]setpts=PTS-STARTPTS,fps=30,setsar=1,format=yuv420p[v{i}]')
+                filters.append(f'[{i}:a]atrim=duration={piece["duration"]},asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.008,afade=t=out:st={max(0,piece["duration"]-.008)}:d=0.008[a{i}]')
         filters.append(''.join(f'[v{i}][a{i}]' for i in range(len(pieces)))+f'concat=n={len(pieces)}:v=1:a=1[raw][audio]')
         filters.append('[raw]'+speaker_filter(project,w,h)+'[actor]')
         next_input=len(pieces)
@@ -138,7 +146,7 @@ def render_lessons(project,plan,transcript,context,preview=True):
     if project['options'].get('sfx',True):
         sfx=render_dir/'effects.wav';sound_effects(sfx,duration,[l['output_start'] for l in lessons[1:]])
         args+=['-i',sfx];af.append(f'[{n}:a]volume=0.35[fx]');mix.append('fx')
-    af.append(''.join('['+label+']' for label in mix)+f'amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=0.89:level=false[aout]')
+    af.append(''.join('['+label+']' for label in mix)+f'amix=inputs={len(mix)}:duration=first:normalize=0,alimiter=limit=0.89:level=false'+''.join(f",volume=0:enable='gte(t,{s['output_start']})*lt(t,{s['output_end']})'" for s in spans if s.get('kind')=='pause')+'[aout]')
     temp=render_dir/'assembling.mp4'
     ffmpeg([*args,'-filter_complex',';'.join(af),'-map','0:v:0','-map','[aout]','-c:v','copy','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',duration,*metadata_args(project),'-movflags','+faststart',temp],context)
     temp.replace(result);write_srt(project,plan,render_dir)

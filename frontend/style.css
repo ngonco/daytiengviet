@@ -46,3 +46,28 @@
 .properties-panel>.panel-title{padding:0 16px 12px}.assembly-workspace .content-tabs{gap:6px;flex-wrap:wrap}.assembly-workspace .content-tabs>button{font-size:10px}.assembly-workspace .lesson-list{max-height:560px}
 @media(max-width:1200px){.assembly-workspace{grid-template-columns:minmax(210px,.8fr) minmax(0,1.8fr)}.assembly-workspace>.properties-panel{grid-column:1/-1;grid-row:2;max-height:none}}
 @media(max-width:760px){.assembly-workspace{display:flex;flex-direction:column}.assembly-workspace>.panel{width:100%}.assembly-workspace>.preview-panel{order:-1}.assembly-workspace>.content-panel{max-height:380px}}
+/* Preview and manual cuts share one viewport. Side panels never displace the timeline. */
+.editing-dock{height:calc(100dvh - 90px);min-height:510px;display:grid;grid-template-rows:minmax(190px,1fr) 270px;gap:8px;position:sticky;top:8px;z-index:3;background:var(--bg,#101713);margin:10px 0 24px}
+.compact-workspace{height:100%;min-height:0;position:relative;display:grid!important;grid-template-columns:1fr!important;grid-template-rows:30px minmax(0,1fr);gap:4px}
+.workspace-tools{grid-column:1/-1;display:flex;gap:8px;align-items:center}.workspace-tools button{padding:5px 10px;font-size:11px}
+.compact-workspace>.content-panel,.compact-workspace>.properties-panel{display:none;position:absolute;top:36px;bottom:0;width:min(330px,85%);z-index:8;max-height:none;overflow:auto;background:#14201a}
+.compact-workspace.show-list>.content-panel{display:flex;left:0}.compact-workspace.show-properties>.properties-panel{display:block;right:0}
+.compact-workspace>.preview-panel{grid-column:1;grid-row:2;height:100%;display:flex;flex-direction:column;min-height:0;overflow:auto;position:static}
+.editing-dock .live-stage,.editing-dock .video-stage{height:auto!important;min-height:100px;flex:1;overflow:hidden}.editing-dock .video-stage video{height:100%!important;max-height:100%!important}
+.editing-dock .panel-top{padding:6px 12px;flex-shrink:0}.editing-dock .preview-footer{padding:4px 12px}.editing-dock .live-controls{padding:4px 12px}.editing-dock .audio-status{display:none}
+.frame-settings,.ai-settings{flex-shrink:0;font-size:11px;padding:3px 12px}.frame-settings summary,.ai-settings summary,.timeline-extra summary{cursor:pointer}
+.editing-dock .manual-timeline{resize:none;min-height:0;height:100%;overflow:auto;padding:8px 12px;margin:0}
+.editing-dock .cut-timeline-heading{margin:0;font-size:11px}.editing-dock .cut-tools{margin:4px 0;gap:5px}.editing-dock .cut-tools button,.editing-dock .cut-markers button{padding:4px 7px;font-size:10px}.editing-dock .cut-tools label{min-width:110px;max-width:190px;font-size:10px}
+.editing-dock .assembly-track{height:64px}.editing-dock .assembly-waveform{height:24px}.editing-dock .cut-ruler{height:24px}.editing-dock .cut-markers{margin:4px 0;gap:6px;align-items:end}.editing-dock .cut-markers label{display:flex;align-items:center;gap:4px;font-size:10px}.editing-dock .cut-markers input{width:90px;padding:3px}.editing-dock .cut-help{font-size:10px}.timeline-extra{font-size:10px}
+.recut-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.recut-toolbar label{display:flex;gap:8px;align-items:center;font-size:12px}.recut-toolbar select{width:100px}.recut-toolbar small{font-size:11px}
+@media(max-height:700px){.editing-dock{height:calc(100dvh - 25px);min-height:460px;grid-template-rows:minmax(140px,1fr) 245px}.editing-dock .ai-settings,.editing-dock .preview-footer{display:none}}
+
+/* Explicit uniform fit: CSS max-height must never squash the composed scene. */
+.live-surface{max-width:none;max-height:none;flex:none}
+.editing-dock .video-stage video{object-fit:contain!important}
+.silence-duration input{width:64px!important}.pause-list{font-size:11px;margin:4px 0}.pause-list summary{cursor:pointer}.pause-list>div{display:flex;gap:8px;align-items:center;margin:5px 0}.pause-list input{width:90px}.pause-list button{padding:4px 8px;font-size:10px}
+
+/* Keep selection handles aligned with the source strip in both timeline sizes. */
+.manual-timeline .cut-timeline-canvas{user-select:none}
+.manual-timeline .cut-selection{top:48px;height:76px}
+.editing-dock .manual-timeline .cut-selection{top:36px;height:64px}

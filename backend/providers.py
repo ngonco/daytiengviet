@@ -141,7 +141,7 @@ def transcribe(project, context):
 def analyze(project, transcript, frames, context, edit_request='', old_plan=None):
     duration = project['metadata']['duration']
     folder = context.folder
-    signature = __import__('hashlib').sha256(json.dumps({'version':2,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
+    signature = __import__('hashlib').sha256(json.dumps({'version':3,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
     base_cache = folder / 'analysis' / signature
     if edit_request:
         base_cache = base_cache / ('revision-' + context.job_id)
@@ -193,6 +193,8 @@ def analyze(project, transcript, frames, context, edit_request='', old_plan=None
 "visuals":[{"start":1.0,"end":4.0,"kind":"photo|vocab|title","layout":"auto|card|full","query":"English Pexels search, only for photo","text":"ngắn gọn tiếng Việt","translation":"nghĩa tiếng Anh"}]}.
 Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ngắn. Video có thể giảng bằng tiếng Anh xen ví dụ tiếng Việt. Cần vi=tiếng Việt, en=tiếng Anh cho MỌI cue. Với phần nói tiếng Việt, giữ nguyên trong vi; với phần nói tiếng Anh, giữ nguyên trong en và dịch sang vi. Có thể sửa lỗi nhận diện RÕ RÀNG dựa vào ngữ cảnh (ví dụ "phrase" thay vì "praise"), nhưng không biến một từ nghe không rõ thành nội dung dạy mới. Từ không chắc không được đưa lên thẻ kiến thức. Ảnh phải minh họa đúng từ/câu, không ảnh trang trí vô nghĩa. Vocab/title để giải thích ngữ pháp, phát âm, thanh điệu hoặc từ trừu tượng. Tối đa 1 visual mỗi 6 giây cho sôi động, mỗi 12 giây cho giáo dục, điều chỉnh theo density. Thời lượng mỗi visual 2-5 giây. Không để các visual chồng nhau. Toàn khung chỉ ở đoạn minh họa, không che miệng khi dạy phát âm. Cuts chỉ bao gồm nói vấp, câu thừa thực sự và khoảng lặng không dùng luyện nói; nếu không chắc thì không cắt. Giữ các lượt nói mẫu và nhắc lại để học. Không cắt giữa từ; bám mốc thời gian cue/word, chừa 0.08s đầu/cuối từ. EDIT_REQUEST chỉ sửa yêu cầu được nêu, giữ nguyên các nội dung khác trong current_plan và mọi locked=true.
 '''
+        strength=project['options'].get('cut_strength','strong')
+        prompt += '\nCUT_STRENGTH='+strength+'. Với mức strong: chủ động bỏ lượt nói vấp/bỏ dở/thu lại; giữ lượt hoàn chỉnh. Rút ngập ngừng và khoảng trống thừa. Vẫn giữ đọc mẫu, lặp để luyện và chờ người học. Không xóa nội dung dạy chỉ để video ngắn hơn.'
         packet = {'window': [start, end], 'overview': overview, 'style': project['options']['style'], 'ratio': project['options']['ratio'], 'density': project['options']['density'], 'captions': captions, 'words': [w for w in transcript['words'] if start <= w['start'] < end], 'current_plan': current, 'EDIT_REQUEST': edit_request}
         messages = [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': prompt + '\nDATA: ' + json.dumps(packet, ensure_ascii=False)}]
         part = None

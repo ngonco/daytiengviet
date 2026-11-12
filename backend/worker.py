@@ -56,6 +56,11 @@ def execute(job):
         from .automation import publish
         publish(project,context,request['automation_hash'])
         store.update(project['id'],status='ready')
+    elif job['kind']=='recut':
+        from .recut import recut
+        plan=recut(project,context)
+        context.check();version(project)
+        store.update(project['id'],plan=plan,revision=project['revision']+1,status='ready')
     elif job['kind']=='prepare_speaker':
         from .matting import ensure_matting
         result=ensure_matting(project,context)
@@ -94,11 +99,18 @@ def execute(job):
                 validate_text_layout({**project,'assets':assets},plan)
             else:
                 assets,photo_warnings=fetch_assets(project,plan,context,vision)
+            plan['pauses']=(project.get('plan') or {}).get('pauses',[])
             # For a conversion, save the previous layout before changing options.
             version(store.read(project['id']) if job['kind']=='reframe' else project)
             project=store.update(project['id'],plan=plan,options=project['options'],assets=assets,warnings=warnings+photo_warnings,vision_supported=vision,revision=project['revision']+1)
         else:
             plan=project['plan']
+        if job['kind']!='reframe':
+            from .recut import recut
+            cut_plan=recut({**project,'plan':plan},context)
+            if cut_plan!=plan:
+                context.check();version(project)
+                plan=cut_plan;project=store.update(project['id'],plan=plan,revision=project['revision']+1)
         if project.get('title_mode')=='auto':
             from .seo import lesson_title
             project=store.update(project['id'],title=lesson_title(project))

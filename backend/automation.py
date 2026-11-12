@@ -234,7 +234,7 @@ def dispatch():
                     copy.unlink(missing_ok=True);raise ValueError('Source đang thay đổi; hãy thử lại khi chép xong.')
                 # Persist ownership before creation so recovery cannot create duplicate projects.
                 row['project_id']=pid;put(row)
-                project=create(copy,'',Options(ratio='9:16' if meta['duration']<=90 else '16:9',layout_mode='lesson',subtitles='bilingual',background_removal={'enabled':bool(config().get('remove_background',False)),'device':'cuda'},video_frames={'9:16':{},'16:9':{}}),pid,True,request)
+                project=create(copy,'',Options(ratio='9:16' if meta['duration']<=90 else '16:9',layout_mode='lesson',landscape_layout='circle',subtitles='bilingual',background_removal={'enabled':bool(config().get('remove_background',False)),'device':'cuda'},video_frames={'9:16':{},'16:9':{}}),pid,True,request)
                 store.update(pid,original_name=source.name,auto_created=True)
                 job=store.jobs(pid)[0]
             row.update(state='running',job_id=job['id'],error=None);put(row)

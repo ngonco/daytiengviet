@@ -153,3 +153,16 @@ Giao diện React/TypeScript; backend FastAPI; SQLite lưu tiến độ; FFmpeg 
 - Có thumbnail, sóng âm, zoom timeline, tiến/lùi từng khung hình, hoàn tác/làm lại thao tác cắt và khôi phục đoạn đã bỏ. Danh sách khôi phục ghi thời gian nguồn. Lưu rồi xuất video để áp dụng thay đổi vào MP4.
 - Khung ngang mới: ảnh bên trái, chữ Việt/Anh bên phải, người nói crop trong vòng tròn góc dưới phải. Kích thước vòng tròn mặc định 25% chiều cao, điều chỉnh 15–40%; zoom/kéo video để căn mặt. Mặc định không xoá phông. Khung dọc giữ bố cục hiện tại.
 - Giao diện chia danh sách, khung xem và bảng thuộc tính riêng; timeline bên dưới có thể tăng chiều cao. Nếu máy chủ chưa nạp trình chỉnh sửa mới, giao diện sẽ báo cần mở lại VietCut.
+
+### Cắt mạnh và chỉnh sau khi tự động
+
+Sau khi tạo tự động, bản dựng được mở để xem và cắt tiếp trong cùng vùng màn hình. Mở danh sách bài học/phụ đề hoặc thuộc tính khi cần; đóng lại để có khung xem rộng. Kéo hoặc zoom timeline, tách tại đầu phát, chọn đoạn rồi bỏ; preview chuyển ngay đến phần còn lại. Lưu và Xuất nằm ngay trên khung xem.
+
+Cường độ cắt có Nhẹ / Vừa / Mạnh, mặc định Mạnh. Lưu trước rồi bấm Chạy lại cắt tự động để tính lại từ âm thanh và transcript đã có. Bước này chỉ đổi các điểm cắt, giữ nội dung bài học/ảnh/phụ đề; có thể khôi phục từng đoạn hoặc phục hồi phiên bản trước. Giữ các khoảng chờ đọc theo và lượt luyện nói được nhận diện; những lượt lặp không rõ nghĩa vẫn cần người dùng rà soát.
+
+### Space và Chèn im lặng
+
+- Bấm **Space** để phát/tạm dừng. Khi nhập chữ, số hoặc sửa nội dung, Space vẫn dùng để gõ bình thường.
+- Đặt đầu phát, chọn **Chèn im lặng +2s**. Bấm lại tại cùng vị trí để cộng dồn 2 → 4 → 6 giây. Sửa ô số giây nếu muốn thời lượng khác.
+- Khoảng chèn giữ khung hình trước đó, không phát âm thanh/nhạc nền và không hiển thị phụ đề. Phần phía sau lùi lại đúng thời lượng.
+- Mở **Khoảng im lặng đã chèn** để đến vị trí, sửa số giây hoặc xoá. Hoàn tác/Làm lại áp dụng cả điểm cắt và khoảng chèn. Lưu rồi xuất để đưa các khoảng chèn vào MP4. Chức năng dùng trong khung bài học.
