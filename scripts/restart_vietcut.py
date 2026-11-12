@@ -97,7 +97,15 @@ def restart():
     if not ready(port):raise RuntimeError('Da gui lenh mo VietCut nhung chua xac nhan duoc ban 1.5.3. Kiem tra data/logs/launcher.log.')
     print('VietCut 1.5.3 da san sang. Cac tac vu trong hang doi se tiep tuc; video goc va cache duoc giu nguyen.')
 
-if __name__=='__main__':
+def main(sync_github=False):
+    synced=True
+    if sync_github:
+        from scripts.sync_github import safe_sync
+        synced=safe_sync(ROOT)
     try:restart()
     except Exception as exc:
-        print(str(exc) if isinstance(exc,RuntimeError) else 'Chua khoi dong lai duoc. Khong thay doi video goc.');raise SystemExit(1)
+        print(str(exc) if isinstance(exc,RuntimeError) else 'Chua khoi dong lai duoc. Khong thay doi video goc.')
+        return 1
+    return 0 if synced else 1
+
+if __name__=='__main__':raise SystemExit(main('--sync-github' in sys.argv[1:]))

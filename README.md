@@ -166,3 +166,13 @@ Cường độ cắt có Nhẹ / Vừa / Mạnh, mặc định Mạnh. Lưu trư
 - Đặt đầu phát, chọn **Chèn im lặng +2s**. Bấm lại tại cùng vị trí để cộng dồn 2 → 4 → 6 giây. Sửa ô số giây nếu muốn thời lượng khác.
 - Khoảng chèn giữ khung hình trước đó, không phát âm thanh/nhạc nền và không hiển thị phụ đề. Phần phía sau lùi lại đúng thời lượng.
 - Mở **Khoảng im lặng đã chèn** để đến vị trí, sửa số giây hoặc xoá. Hoàn tác/Làm lại áp dụng cả điểm cắt và khoảng chèn. Lưu rồi xuất để đưa các khoảng chèn vào MP4. Chức năng dùng trong khung bài học.
+
+
+### Tự động đẩy GitHub khi khởi động lại
+
+Chạy `KHOI_DONG_LAI_VIETCUT.cmd` sẽ tự kiểm tra thay đổi mã nguồn/tài liệu, quét dữ liệu riêng và khóa API, commit rồi push lên nhánh `main` của `ngonco/daytiengviet`. Không có thay đổi thì không tạo commit mới. Nếu lần trước đã commit nhưng chưa push được, lần sau sẽ thử đẩy lại.
+
+- Chỉ đồng bộ các vị trí mã nguồn, tài liệu, cấu hình và tài nguyên đóng gói của app. Không tự đưa video, dữ liệu dự án, cache, bản xuất hay `.env` lên GitHub.
+- Không tự đổi nhánh, pull/merge hoặc force-push. Nếu có xung đột, sai kho, file staged ngoài phạm vi hoặc quét khóa API không đạt, phần đồng bộ sẽ dừng và báo rõ.
+- Mất mạng, hết phiên đăng nhập GitHub hoặc thiếu quyền Git: commit đã tạo vẫn được giữ. VietCut vẫn thử khởi động lại; cửa sổ CMD giữ thông báo lỗi để xem. Không tự mở hộp thoại đăng nhập.
+- Cần Git đã cài, thông tin tác giả Git đã thiết lập và quyền push hiện có. Lưu chỉnh sửa đang mở trong app trước khi khởi động lại.
