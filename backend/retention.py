@@ -142,3 +142,19 @@ def restore(project_id):
             raise ValueError('Tệp dự án đang được sử dụng. Hãy thử khôi phục lại sau.') from exc
         sweep(protect=project_id)
         return store.read(project_id)
+
+def archive(project_id,at=None):
+    """Explicit user deletion: journal a recoverable move, never purge immediately."""
+    at=at or datetime.now(timezone.utc)
+    with store.LOCK:
+        project=store.read(project_id)
+        if busy(project_id):raise ValueError('Project still has active work; cancel it before moving to Trash.')
+        safe_path(project_id,'projects');target=safe_path(project_id,'trash')
+        if target.exists():raise ValueError('Trash destination already exists.')
+        project['_retention']={'state':'archiving','deleted_at':at.isoformat(),'purge_after':(at+timedelta(days=DAYS)).isoformat()}
+        store.save(project)
+        try:_finish(project,at)
+        except (OSError,ValueError):
+            _rollback_unmoved(project)
+            raise
+        return project_id

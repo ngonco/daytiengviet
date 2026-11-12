@@ -16,10 +16,10 @@ from PIL import Image, ImageOps
 from . import store, worker
 from .config import ROOT, settings
 from .media import probe
-from .providers import connection_checks, search_photos, download_photo
+from .providers import connection_checks, search_photos, download_photo, PROVIDER_RETRY_VERSION
 from .timeline import validate_plan, keep_spans
 from .matting_schema import BackgroundRemoval, validate_duration
-from .timeline import PhotoCrop
+from .timeline import PhotoCrop, VideoFrame
 
 class Options(BaseModel):
     model_config=ConfigDict(extra='ignore',allow_inf_nan=False)
@@ -37,6 +37,9 @@ class Options(BaseModel):
     speaker_x: float | None=Field(default=None,ge=0,le=1)
     speaker_y: float | None=Field(default=None,ge=0,le=1)
     speaker_scale: float=Field(default=1,ge=.65,le=1.5)
+    landscape_layout: Literal['classic','circle']='classic'
+    speaker_size: float=Field(default=.25,ge=.15,le=.4)
+    video_frames: dict[Literal['9:16','16:9'],VideoFrame]=Field(default_factory=dict)
     background_removal: BackgroundRemoval=Field(default_factory=BackgroundRemoval)
 
 class SampleBody(BaseModel):
@@ -106,11 +109,12 @@ async def lifespan(app):
         try:await maintenance
         except asyncio.CancelledError:pass
 
-app=FastAPI(title='VietCut Studio',version='1.5.1',lifespan=lifespan)
+app=FastAPI(title='VietCut Studio',version='1.5.3',lifespan=lifespan)
 
 class AutomationConfig(BaseModel):
     folder: str | None=None
     enabled: bool | None=None
+    remove_background: bool | None=None
 
 class ProjectTitle(BaseModel):
     title: str=Field(min_length=1,max_length=120)
@@ -123,7 +127,7 @@ def automation_read():
 @app.put('/api/automation')
 def automation_config(body:AutomationConfig):
     from .automation import configure,snapshot
-    configure(body.folder,body.enabled)
+    configure(body.folder,body.enabled,remove_background=body.remove_background)
     return snapshot()
 
 @app.post('/api/automation/folder')
@@ -201,11 +205,14 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
     if 'layout_mode' not in options.model_fields_set:
         values['layout_mode']='lesson'
     if 'background_removal' not in options.model_fields_set:
-        values['background_removal']['enabled']=True
+        values['background_removal']['enabled']=False
     validate_duration(values,metadata['duration'])
     if values['style']=='auto':
         portrait=values['ratio']=='9:16' or values['ratio']=='original' and metadata['height']>metadata['width']
         values['style']='energetic' if portrait else 'education'
+    if values.get('layout_mode')=='lesson' and not values.get('video_frames'):
+        values['video_frames']={'9:16':VideoFrame().model_dump(),'16:9':VideoFrame().model_dump()}
+    if values.get('layout_mode')=='lesson' and 'landscape_layout' not in options.model_fields_set:values['landscape_layout']='circle'
     project={'id':project_id,'title':title[:120] or 'Bài học mới','source_file':target.name,'original_name':source.name,'metadata':metadata,'options':values,'status':'new','revision':0,'plan':None,'transcript':None,'assets':{},'frames':[],'warnings':[],'preview':None,'export':None,'music_file':None,'created_at':store.now()}
     project['title_mode']='auto' if title.strip() in ['', 'Bài học mới', 'Bài học tiếng Việt'] else 'manual'
     store.save(project)
@@ -216,7 +223,14 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':'1.5.1'}
+    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':1}
+
+@app.get('/api/projects/{project_id}/waveform')
+def editor_waveform(project_id:str):
+    from .edit_media import waveform
+    project=store.read(project_id)
+    return waveform(project,store.folder(project_id))
+
 
 @app.get('/api/trash')
 def trash():
@@ -336,14 +350,14 @@ def prepare_photos(project_id:str,lesson_id:str,body:PhotoPoolBody):
         return store.job_create(project_id,'lesson_photos',{'lesson_id':lesson_id,'generation':store.uid() if body.refresh else 'initial','refresh':body.refresh})
 
 @app.get('/api/projects/{project_id}/photo-layout')
-def photo_layout(project_id:str,asset_id:str,ratio:Literal['9:16','16:9','original']='9:16',zoom:float=1):
+def photo_layout(project_id:str,asset_id:str,ratio:Literal['9:16','16:9','original']='9:16',zoom:float=1,landscape_layout:Literal['classic','circle']|None=None):
     from .photo_layout import layout
     from .templates import geometry
     from .render import dimensions
     project=store.read(project_id);asset=project.get('assets',{}).get(asset_id)
     if not asset or Path(asset['file']).name!=asset['file']:raise HTTPException(404,'Không tìm thấy ảnh.')
     w,h=dimensions({**project,'options':{**project['options'],'ratio':ratio}},False)
-    g=geometry(w,h);_,_,pw,ph=g['photo']
+    g=geometry(w,h,{**project['options'],**({'landscape_layout':landscape_layout} if landscape_layout else {})});_,_,pw,ph=g['photo']
     with Image.open(store.folder(project_id)/'assets'/asset['file']) as image:
         image=ImageOps.exif_transpose(image)
         return {**layout(*image.size,pw,ph,zoom),'crop_key':'9:16' if g['portrait'] else '16:9'}

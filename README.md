@@ -4,6 +4,30 @@
 
 Mã nguồn: [ngonco/daytiengviet](https://github.com/ngonco/daytiengviet).
 
+## Khởi động lại để nạp bản sửa 1.5.3
+
+Chạy **KHOI_DONG_LAI_VIETCUT.cmd** khi không còn tác vụ đang chạy. Tệp kiểm tra đúng tiến trình VietCut của thư mục này, từ chối dừng app khác hoặc tác vụ còn hoạt động, rồi mở lại máy chủ và xác nhận bản mới. Hàng đợi, nguồn, bản đã xuất và cache vẫn giữ nguyên. Nếu dùng lệnh khởi chạy tương đối hoặc không xác minh được tiến trình, tệp sẽ từ chối thay vì tắt nhầm chương trình.
+
+Bộ dựng video mới tự dừng và thử lại theo cơ chế hàng đợi khi FFmpeg không tăng tiến độ trong 3 phút; các đoạn đã xong được dùng lại.
+
+## Khôi phục khi dịch vụ ngắt kết nối
+
+Lỗi ngắt kết nối trong lúc nhận diện lời nói hoặc gọi AI được thử lại tối đa 3 lần, có hiển thị tên dịch vụ và lượt thử. Khi vẫn lỗi tạm thời, chế độ tự động chờ 30/120 giây để thử tiếp. Dữ liệu nhận diện và phân tích đã lưu được dùng lại. Lỗi key/quyền truy cập cần sửa cấu hình trước khi thử lại.
+
+Sau khi cập nhật mã, cần khởi động lại **máy chủ Python VietCut**; đóng tab trình duyệt riêng không nạp lại mã máy chủ.
+
+## Giữ nền, zoom video và cắt thủ công (v1.5.2)
+
+Dự án mới mặc định tick **Không xoá nền video**, gồm cả tạo thủ công và tự động theo thư mục. Bỏ tick khi cần xoá nền bằng GPU. Dự án cũ giữ nguyên lựa chọn đã lưu.
+
+Trong **Bản dựng**, kéo video để chỉnh vị trí, dùng **Zoom video trong khung** (25–400%) và **Đặt lại video** để trở về toàn hình ở giữa. Cài đặt áp dụng toàn video và lưu riêng cho khung dọc/ngang.
+
+Video đã chạy tự động vẫn mở lại để chỉnh sửa: phóng to **Zoom timeline**, cuộn ngang đến đoạn cần bỏ → tua và **Đánh dấu đầu** → **Đánh dấu cuối** → **Cắt bỏ đoạn**. Có thể nhập giây, tiến/lùi từng khung hình, hoặc dùng phím mũi tên trên timeline. Bỏ tick một đoạn cắt để khôi phục đoạn đó. Chọn **Bản dựng** để xem kết quả, rồi **Lưu → Xuất video**. Phụ đề và nội dung bài học dùng cùng mốc cắt, không chạy lại AI.
+
+Với dự án tự động theo thư mục, bản xuất chỉnh sửa được lưu cạnh video nguồn và hiện đường dẫn trên giao diện. Tên trùng được thêm số; video gốc và các bản đã xuất trước vẫn được giữ. Nếu lỗi lưu file, bấm thử lại tác vụ xuất.
+
+Sau cập nhật, khởi động lại máy chủ VietCut và tải lại trang bằng Ctrl + F5 để dùng cả API/giao diện mới.
+
 ## Tự cân âm lượng giọng nói (v1.5.1)
 
 **CÁCH DỰNG → Tự cân âm lượng giọng nói** mặc định bật. Bản dựng trực tiếp tự đo nguồn và tăng âm khi nhỏ, giới hạn theo đỉnh âm để tránh vỡ tiếng; có trạng thái đang đo/đã cân. Tắt công tắc để so sánh với mức gốc. Bản gốc vẫn phát âm thanh nguyên bản.
@@ -14,7 +38,7 @@ Trên bản sao nguồn thử, âm lượng tăng từ -25,86 lên -16,07 LUFS (
 
 ## Tự động dựng và xuất cạnh source (v1.5)
 
-Mở **Tự động dựng → Chọn thư mục → Bật tự động dựng**. App nhận video đang có và video mới trong cả thư mục con, chờ file ổn định ít nhất 10 giây rồi xử lý lần lượt. Video gốc **đến hết 90 giây xuất dọc 1080×1920**, trên 90 giây xuất ngang 1920×1080; phụ đề Việt–Anh, khung bài học và xoá phông GPU. Bản MP4 cuối được kiểm tra rồi lưu ngay cạnh từng source, không dựng thêm MP4 xem trước.
+Mở **Tự động dựng → Chọn thư mục → Bật tự động dựng**. App nhận video đang có và video mới trong cả thư mục con, chờ file ổn định ít nhất 10 giây rồi xử lý lần lượt. Video gốc **đến hết 90 giây xuất dọc 1080×1920**, trên 90 giây xuất ngang 1920×1080; phụ đề Việt–Anh, khung bài học và giữ nền gốc mặc định; có thể chọn xoá phông GPU. Bản MP4 cuối được kiểm tra rồi lưu ngay cạnh từng source, không dựng thêm MP4 xem trước.
 
 App nhớ nội dung file dù đổi tên/chuyển thư mục, tận dụng dự án phù hợp và bỏ qua nguồn đã xuất thành công. Lịch sử này vẫn còn khi dự án vào Thùng rác hoặc hết hạn lưu. File xuất không được nhận lại làm nguồn. Lỗi tạm thời thử lại hai lần; nguồn vẫn lỗi được ghi riêng để tiếp tục nguồn khác. Lỗi lưu chỉ thử lại việc lưu, không gọi lại AI. Thiếu GPU hoặc cấu hình cần sửa rồi bấm **Thử lại**. **Tạm dừng nhận nguồn** dừng nhận/xếp việc mới, để tác vụ hiện tại hoàn tất. **Quét ngay** vẫn chờ file ổn định. Giữ VietCut chạy để theo dõi; mở lại app sẽ tiếp tục hàng đợi, không cần giữ tab trình duyệt mở.
 
@@ -42,7 +66,7 @@ Bản sửa được dùng khi dựng lại dự án có khung bài học; bản
 
 ## Xóa phông tự động (v1.2)
 
-Dự án mới tự bật xóa phông; dự án cũ giữ nguyên và có công tắc bật riêng. Người nói giữ trong ô hiện tại, nền đổi sang kem. Tối ưu một người đứng nói, camera cố định, chuyển động nhẹ.
+Từ v1.5.2, dự án mới mặc định giữ nền gốc; dự án cũ giữ nguyên và có công tắc bật riêng. Người nói giữ trong ô hiện tại, nền đổi sang kem. Tối ưu một người đứng nói, camera cố định, chuyển động nhẹ.
 
 Chạy **CAI_DAT_XOA_PHONG.cmd** để cài bộ GPU riêng. Có xem clip trước/sau, kiểm tra nền kem/đen/trắng, co/nới/làm mềm viền và cọ giữ/bỏ theo thời gian nguồn. Đổi khung dọc/ngang hoặc sửa chữ/ảnh dùng lại kết quả. Hủy và thử lại tiếp tục từ đoạn 20 giây đã hoàn tất.
 
@@ -122,3 +146,10 @@ Backend: `python -m uvicorn backend.app:app --host 127.0.0.1 --port 8876`.
 Frontend: `npm run dev` (kết nối backend theo APP_PORT trong `.env`).
 
 Giao diện React/TypeScript; backend FastAPI; SQLite lưu tiến độ; FFmpeg dựng từng đoạn và tái sử dụng các đoạn không thay đổi. Âm thanh trung gian PCM tránh tích lũy độ trễ AAC khi ghép bài dài.
+
+### Chỉnh sửa bản dựng sau khi chạy tự động
+
+- Timeline hiển thị thời gian bản dựng đã nối. Dùng **Tách tại đầu phát**, chọn đoạn rồi **Cắt bỏ đoạn**, hoặc đánh dấu đầu/cuối và kéo mép vùng chọn. Các đoạn còn lại nối theo thứ tự nguồn; không chạy lại AI.
+- Có thumbnail, sóng âm, zoom timeline, tiến/lùi từng khung hình, hoàn tác/làm lại thao tác cắt và khôi phục đoạn đã bỏ. Danh sách khôi phục ghi thời gian nguồn. Lưu rồi xuất video để áp dụng thay đổi vào MP4.
+- Khung ngang mới: ảnh bên trái, chữ Việt/Anh bên phải, người nói crop trong vòng tròn góc dưới phải. Kích thước vòng tròn mặc định 25% chiều cao, điều chỉnh 15–40%; zoom/kéo video để căn mặt. Mặc định không xoá phông. Khung dọc giữ bố cục hiện tại.
+- Giao diện chia danh sách, khung xem và bảng thuộc tính riêng; timeline bên dưới có thể tăng chiều cao. Nếu máy chủ chưa nạp trình chỉnh sửa mới, giao diện sẽ báo cần mở lại VietCut.

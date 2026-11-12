@@ -2,7 +2,7 @@ import React, {useEffect,useState} from 'react';
 import {FolderOpen,Play,Pause,RefreshCw} from 'lucide-react';
 
 type Item={hash:string;source:string;state:string;project_id?:string;output?:string;error?:string;message?:string;progress?:number;duplicate_paths?:string[]};
-type Snapshot={config:{folder:string;enabled:boolean;message:string};items:Item[];counts:Record<string,number>};
+type Snapshot={config:{folder:string;enabled:boolean;remove_background?:boolean;message:string};items:Item[];counts:Record<string,number>};
 const labels:Record<string,string>={waiting:'Đang chờ',running:'Đang dựng',retry_wait:'Chờ thử lại',done:'Đã hoàn tất',failed:'Chưa hoàn tất',needs_attention:'Cần kiểm tra cấu hình',cancelled:'Đã dừng'};
 async function request(path:string,body?:unknown,method='POST'){
  const response=await fetch('/api/automation'+path,body===undefined?{method}:{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -22,7 +22,8 @@ export default function AutomationPanel({onOpen}:{onOpen:(id:string)=>void}){
    <div className="field-row"><button className="secondary" disabled={pending||data?.config.enabled} onClick={()=>act(async()=>{const result=await request('/folder');if(result.folder){setFolder(result.folder);setEdited(false);await request('',{folder:result.folder},'PUT')}})}><FolderOpen size={16}/> Chọn thư mục</button>
    <button className="secondary" disabled={pending||!folder} onClick={()=>act(async()=>{await request('',{folder},'PUT');setEdited(false);await request('/scan')})}><RefreshCw size={16}/> Quét ngay</button>
    <button className="primary" disabled={pending||!folder} onClick={()=>act(async()=>{await request('',data?.config.enabled?{enabled:false}:{folder,enabled:true},'PUT');setEdited(false)})}>{data?.config.enabled?<><Pause size={16}/> Tạm dừng nhận nguồn</>:<><Play size={16}/> Bật tự động dựng</>}</button></div>
-   <p><b>Đến 90 giây: dọc 9:16 · Trên 90 giây: ngang 16:9</b><br/>Full HD · Phụ đề Việt–Anh · Xoá phông GPU tại máy · Tự cân âm lượng giọng nói</p>
+   <label className="check-label"><input type="checkbox" checked={!data?.config.remove_background} disabled={pending||!data} onChange={e=>act(async()=>{await request('',{remove_background:!e.target.checked},'PUT')})}/> Không xoá nền video</label>
+   <p><b>Đến 90 giây: dọc 9:16 · Trên 90 giây: ngang 16:9</b><br/>Full HD · Phụ đề Việt-Anh · {data?.config.remove_background?'Xoá nền bằng GPU':'Giữ nền video gốc'} · Tự cân âm lượng giọng nói</p><small>Cài đặt nền áp dụng cho dự án tạo tiếp theo. Mở dự án đã hoàn tất để cắt thủ công, zoom video và xuất bản mới cạnh nguồn.</small>
    <small>Nhớ nguồn theo nội dung dù đổi tên hoặc chuyển thư mục. Chỉ nhận file đã chép ổn định. Tạm dừng vẫn để video đang dựng hoàn tất. Giữ VietCut chạy để tiếp tục theo dõi.</small>
    <p role="status">{pending?'Đang xử lý…':data?.config.message||'Chưa bật theo dõi.'}</p>
   </div>

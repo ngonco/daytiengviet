@@ -75,11 +75,12 @@ class MattingTests(unittest.TestCase):
                 self.assertEqual(read_exact(p.stdout,len(data)),data);self.assertIsNone(read_exact(p.stdout,1));pipes.finish(p)
             finally:pipes.close()
 
-    def test_old_off_new_on_explicit_off(self):
+    def test_old_off_new_off_explicit_on(self):
         self.assertFalse(Options().background_removal.enabled)
         with TemporaryDirectory() as tmp,patch('backend.store.data_root',return_value=Path(tmp)),patch('backend.app.probe',return_value={'duration':10,'width':320,'height':180}):
             store.init();source=Path(tmp)/'input.mp4';source.write_bytes(b'sample')
-            self.assertTrue(create(source,'new',Options())['options']['background_removal']['enabled'])
+            self.assertFalse(create(source,'new',Options())['options']['background_removal']['enabled'])
+            self.assertTrue(create(source,'on',Options(background_removal={'enabled':True}))['options']['background_removal']['enabled'])
             self.assertFalse(create(source,'off',Options(background_removal={'enabled':False}))['options']['background_removal']['enabled'])
 
     def test_validation_rejects_invalid_corrections(self):

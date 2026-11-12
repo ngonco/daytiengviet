@@ -6,7 +6,7 @@ import io
 import json
 import threading
 from pathlib import Path
-from .templates import geometry,signature,make_frame,speaker_focus,subtitle_position,brand
+from .templates import geometry,signature,make_frame,speaker_transform,subtitle_position,brand
 from .lesson_render import subtitle_image
 from .render import dimensions
 from .matting_schema import BackgroundRemoval
@@ -46,7 +46,7 @@ def source_info(project,folder):
 
 
 def scene(project,folder,lesson,caption,sequence=0):
-    w,h=dimensions(project,True);g=geometry(w,h);theme=signature()
+    w,h=dimensions(project,True);g=geometry(w,h,project['options']);theme=signature()
     asset_id=lesson.get('asset_id');fingerprint=None
     if asset_id:
         asset=project.get('assets',{}).get(asset_id)
@@ -56,18 +56,14 @@ def scene(project,folder,lesson,caption,sequence=0):
         except OSError:raise ValueError('Tệp ảnh không còn trong dự án. Hãy chọn ảnh khác.') from None
         fingerprint=[asset_id,st.st_size,st.st_mtime_ns]
     visual={k:lesson.get(k) for k in ['vi','en','chunks','asset_id','photo_crops']}
-    page=png_cached({'kind':'page','theme':theme,'size':[w,h],'lesson':visual,'asset':fingerprint,'project':project['id']},lambda:make_frame(project,lesson,folder,w,h))
+    page=png_cached({'kind':'page','geometry':g,'theme':theme,'size':[w,h],'lesson':visual,'asset':fingerprint,'project':project['id']},lambda:make_frame(project,lesson,folder,w,h))
     sub=None;position=None
     if caption and caption.get('vi','').strip() and project['options'].get('subtitles')!='off':
         caption={**caption,'en':caption.get('en','') if project['options'].get('subtitles')=='bilingual' else ''}
-        sub=png_cached({'kind':'subtitle','size':[w,h],'theme':theme,'vi':caption['vi'],'en':caption['en']},lambda:subtitle_image(caption,w,h))
+        sub=png_cached({'kind':'subtitle','geometry':g,'size':[w,h],'theme':theme,'vi':caption['vi'],'en':caption['en']},lambda:subtitle_image(caption,w,h,options=project['options']))
         with ImageReader(sub) as image:tw,th=image.size
-        x,y=subtitle_position(w,h,tw,th);position=[x,y,tw,th]
-    fx,fy,fw,fh=speaker_focus(project,w,h);sx,sy,cw,ch=g['speaker']
-    cropw,croph=min(fw,cw),min(fh,ch)
-    left=(cw-cropw)/2-max(0,min(fw-cropw,fw*fx-cropw*.5))
-    top=(ch-croph)/2-max(0,min(fh-croph,fh*fy-croph*.42))
-    return {'sequence':sequence,'width':w,'height':h,'geometry':g,'speaker_transform':{'left':left,'top':top,'width':fw,'height':fh},'page':data_url(page),'subtitle':data_url(sub) if sub else None,'subtitle_rect':position,'source':source_info(project,folder)}
+        x,y=subtitle_position(w,h,tw,th,project['options']);position=[x,y,tw,th]
+    return {'sequence':sequence,'width':w,'height':h,'geometry':g,'speaker_transform':speaker_transform(project,w,h),'page':data_url(page),'subtitle':data_url(sub) if sub else None,'subtitle_rect':position,'source':source_info(project,folder)}
 
 
 def ImageReader(raw):

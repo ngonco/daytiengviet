@@ -9,15 +9,35 @@ from .config import binary, ROOT
 class Cancelled(Exception):
     pass
 
-def run(command, context=None, cwd=None):
+class MediaStalled(TimeoutError):
+    pass
+
+def run(command, context=None, cwd=None, progress_timeout=None):
     """Drain stderr to disk, keeping media jobs cancellable and memory bounded."""
     import tempfile
+    import threading
     with tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=errors, cwd=cwd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if progress_timeout else subprocess.DEVNULL, stderr=errors, cwd=cwd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        heartbeat={'at':time.monotonic()}
+        reader=None
+        if progress_timeout:
+            def drain_progress():
+                values={}
+                for raw in iter(lambda:process.stdout.readline(4096),b''):
+                    key,separator,value=raw.partition(b'=')
+                    if not separator or key not in [b'frame',b'out_time_us',b'out_time_ms']:continue
+                    try:value=int(value.strip())
+                    except ValueError:continue
+                    if value>=0 and value>values.get(key,-1):
+                        values[key]=value;heartbeat['at']=time.monotonic()
+            reader=threading.Thread(target=drain_progress,name='ffmpeg-progress',daemon=True)
+            reader.start()
         try:
             while process.poll() is None:
                 if context:
                     context.check()
+                if progress_timeout and time.monotonic()-heartbeat['at']>progress_timeout:
+                    raise MediaStalled('FFmpeg không tăng tiến độ trong 3 phút. Các đoạn đã hoàn thành được giữ để thử lại.')
                 time.sleep(0.15)
         except BaseException:
             process.terminate()
@@ -27,6 +47,10 @@ def run(command, context=None, cwd=None):
                 process.kill()
                 process.wait()
             raise
+        finally:
+            if reader:
+                reader.join(timeout=1)
+                process.stdout.close()
         if process.returncode:
             errors.seek(0, 2)
             length = errors.tell()
@@ -36,7 +60,7 @@ def run(command, context=None, cwd=None):
             raise RuntimeError('FFmpeg không xử lý được video: ' + detail[-2000:])
 
 def ffmpeg(arguments, context=None, cwd=None):
-    return run([binary('ffmpeg'), '-hide_banner', '-loglevel', 'error', '-y', '-threads', '2', *map(str, arguments)], context, cwd)
+    return run([binary('ffmpeg'), '-hide_banner', '-loglevel', 'error', '-nostdin', '-progress', 'pipe:1', '-y', '-threads', '2', *map(str, arguments)], context, cwd, progress_timeout=180)
 
 def probe(path):
     response = subprocess.run([binary('ffprobe'), '-v', 'error', '-show_format', '-show_streams', '-of', 'json', str(path)], capture_output=True, timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))

@@ -57,6 +57,8 @@ class FolderTests(unittest.TestCase):
                 with patch('backend.automation.probe',return_value={'duration':duration}),patch('backend.app.probe',return_value={'duration':duration,'width':320,'height':180,'fps':'30/1'}):automation.dispatch()
                 row=automation.get(code);project=store.read(row['project_id'])
                 self.assertEqual(project['options']['ratio'],ratio)
+                self.assertFalse(project['options']['background_removal']['enabled'])
+                self.assertEqual(project['options']['video_frames']['9:16']['zoom'],1)
                 self.assertEqual(project['title_mode'],'auto')
                 job=store.job_read(row['job_id']);self.assertEqual(json.loads(job['request'])['automation_hash'],code)
                 store.job_update(job['id'],status='succeeded');row['state']='done';automation.put(row)
@@ -66,6 +68,14 @@ class FolderTests(unittest.TestCase):
             automation.dispatch();self.assertEqual(store.jobs(),[])
             automation.dispatch();self.assertEqual(len(store.jobs()),1)
         self.assertEqual(sorted(r['state'] for r in automation.items()),['failed','running'])
+
+    def test_background_setting_applies_to_new_automatic_projects_only(self):
+        old,_=self.project();before=copy.deepcopy(store.read(old['id']))
+        self.input('new.mp4',b'new source');self.scan();automation.configure(enabled=True,remove_background=True)
+        with patch('backend.automation.probe',return_value={'duration':10}),patch('backend.app.probe',return_value={'duration':10,'width':320,'height':180}):automation.dispatch()
+        created=next(p for p in store.listing() if p['id']!=old['id'])
+        self.assertTrue(created['options']['background_removal']['enabled'])
+        self.assertEqual(store.read(old['id']),before)
     def test_retry_schedule_configuration_and_cancellation(self):
         row={'hash':'a'*64,'source':str(self.input()),'state':'running','created_at':store.now()}
         with patch('backend.automation.time.time',return_value=100):
@@ -97,6 +107,7 @@ class FolderTests(unittest.TestCase):
         with patch('backend.automation.publish') as publish,patch('backend.worker.prepared_render',side_effect=AssertionError('must not render')),patch('backend.worker.transcribe',side_effect=AssertionError('must not transcribe')):
             worker.execute(job);publish.assert_called_once()
     def test_invalid_export_never_marks_done(self):
+        # Publication must validate bytes before exposing the edited output too.
         project,folder=self.project();src=self.input();code=automation.digest(src)
         automation.put({'hash':code,'source':str(src),'state':'running'})
         with patch('backend.automation.ffmpeg',side_effect=RuntimeError('corrupt')):
@@ -152,6 +163,23 @@ class FolderTests(unittest.TestCase):
         ffmpeg(['-xerror','-i',target,'-f','null','-'])
         automation.scan(force=True,at=150);automation.scan(force=True,at=161);automation.dispatch()
         self.assertEqual(len(store.jobs()),1);self.assertEqual(len(automation.items()),1)
+        first_bytes=target.read_bytes();source_bytes=source.read_bytes()
+        saved=store.read(p['id']);saved['plan']['cuts']=[{'id':'manual','start':.2,'end':.5,'enabled':True,'locked':True}]
+        saved['options']['video_frames']['9:16']={'zoom':1.7,'x':.1,'y':-.1}
+        store.update(p['id'],plan=saved['plan'],options=saved['options'],revision=saved['revision']+1)
+        manual=store.job_create(p['id'],'export')
+        with patch('backend.worker.transcribe',side_effect=AssertionError('manual export must not run STT')),patch('backend.worker.analyze',side_effect=AssertionError('manual export must not run AI')):
+            worker.execute(manual)
+        edited=store.read(p['id'])['export'];published=Path(edited['published_file'])
+        self.assertNotEqual(published,target);self.assertEqual(published.parent,source.parent)
+        self.assertEqual(target.read_bytes(),first_bytes);self.assertEqual(source.read_bytes(),source_bytes)
+        self.assertAlmostEqual(probe(published)['duration'],duration-.3,delta=.1)
+        ffmpeg(['-xerror','-i',published,'-f','null','-'])
+        self.assertEqual(automation.get(row['hash'])['state'],'done')
+        store.job_update(manual['id'],status='succeeded')
+        automation.scan(force=True,at=180);automation.scan(force=True,at=191);automation.dispatch()
+        self.assertEqual(len(automation.items()),1)
+
 
 
 class NamingAndFramesTests(unittest.TestCase):

@@ -2,12 +2,12 @@ import React,{useEffect,useRef,useState} from 'react';
 export type Crop={x:number;y:number;zoom:number};
 export const centerCrop:Crop={x:.5,y:.5,zoom:1};
 type Geometry={frame_width:number;frame_height:number;scaled_width:number;scaled_height:number;overflow_x:number;overflow_y:number;crop_key:string};
-type Props={projectId:string;assetId:string;file:string;ratio:string;value:Crop;disabled:boolean;onChange:(crop:Crop)=>void};
+type Props={landscapeLayout?:'classic'|'circle';projectId:string;assetId:string;file:string;ratio:string;value:Crop;disabled:boolean;onChange:(crop:Crop)=>void};
 
-export default function PhotoCrop({projectId,assetId,file,ratio,value,disabled,onChange}:Props){
+export default function PhotoCrop({landscapeLayout,projectId,assetId,file,ratio,value,disabled,onChange}:Props){
  const [geometry,setGeometry]=useState<Geometry|null>(null),[error,setError]=useState(''),[loading,setLoading]=useState(true);
  const drag=useRef<{x:number;y:number;crop:Crop;w:number;h:number}|null>(null);
- useEffect(()=>{const abort=new AbortController();setLoading(true);setError('');fetch(`/api/projects/${projectId}/photo-layout?asset_id=${encodeURIComponent(assetId)}&ratio=${encodeURIComponent(ratio)}&zoom=${value.zoom}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('Chưa đọc được ảnh để căn khung.');return r.json()}).then(g=>{setGeometry(g);setLoading(false)}).catch(e=>{if(e.name!=='AbortError'){setError(e.message);setLoading(false)}});return()=>abort.abort()},[projectId,assetId,ratio,value.zoom]);
+ useEffect(()=>{const abort=new AbortController();setLoading(true);setError('');fetch(`/api/projects/${projectId}/photo-layout?asset_id=${encodeURIComponent(assetId)}&ratio=${encodeURIComponent(ratio)}&zoom=${value.zoom}&landscape_layout=${landscapeLayout||'classic'}`,{signal:abort.signal}).then(async r=>{if(!r.ok)throw new Error('Chưa đọc được ảnh để căn khung.');return r.json()}).then(g=>{setGeometry(g);setLoading(false)}).catch(e=>{if(e.name!=='AbortError'){setError(e.message);setLoading(false)}});return()=>abort.abort()},[projectId,assetId,ratio,value.zoom,landscapeLayout]);
  const g=geometry;
  return <div className="photo-crop"><div className="inspector-title"><b>Căn ảnh · {ratio==='original'?'tỷ lệ gốc':ratio}</b><button className="text-button" disabled={disabled} onClick={()=>onChange({...centerCrop})}>Đặt lại</button></div>
  {error&&<p role="alert" className="warning-note">{error}</p>}

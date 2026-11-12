@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .photo_layout import cover
 from .config import ROOT
 
-TEMPLATE_VERSION=3
+TEMPLATE_VERSION=5
 FONT_DIR=ROOT/'assets/fonts'
 
 def brand():
@@ -30,7 +30,7 @@ def font(size,bold=False,serif=False):
     result.set_variation_by_axes(values)
     return result
 
-def geometry(w,h):
+def geometry(w,h,options=None):
     portrait=h>w
     ref_w,ref_h=(1080,1920) if portrait else (1920,1080)
     sx,sy=w/ref_w,h/ref_h
@@ -38,6 +38,13 @@ def geometry(w,h):
         # Only the output canvas needs even dimensions for H.264. Rounding each
         # inner box to even pixels shifts/crops the half-size live preview.
         return tuple(round(value*scale) for value,scale in [(x,sx),(y,sy),(rw,sx),(rh,sy)])
+    circle=not portrait and (options or {}).get('landscape_layout')=='circle'
+    diameter=round(1080*(options or {}).get('speaker_size',.25))
+    if circle:
+        return {'portrait':False,'speaker':rect(1920-40-diameter,1080-40-diameter,diameter,diameter),
+                'content':rect(1000,100,880,min(625,910-diameter)),'photo':rect(40,100,920,800),
+                'brand':rect(40,28,1840,42),'radius':round(36*min(sx,sy)),
+                'speaker_radius':round(diameter*min(sx,sy)/2),'scale':min(sx,sy),'circle':True}
     return {'portrait':portrait,'speaker':rect(46,1208,988,570) if portrait else rect(28,32,604,1016),
             'content':rect(46,692,988,484) if portrait else rect(686,92,1180,466),
             'photo':rect(46,96,988,566) if portrait else rect(686,600,1180,448),
@@ -88,14 +95,14 @@ def rounded_mask(size,radius):
     return image
 
 def make_frame(project,lesson,folder,w,h,target=None):
-    g=geometry(w,h);b=brand();s=g['scale']
+    g=geometry(w,h,project.get('options',{}));b=brand();s=g['scale']
     image=paper(w,h,signature()).copy();draw=ImageDraw.Draw(image)
     bx,by,bw,bh=g['brand']
     draw_centered(draw,(bx,by,bw,bh),b['name'],29*s,21*s,b['ink'],bold=True,max_lines=1)
     x,y,sw,sh=g['speaker']
     pad=max(2,round(5*s))
-    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g['radius']+pad,fill=b['border'])
-    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g['radius'],fill=b['paper'])
+    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g.get('speaker_radius',g['radius'])+pad,fill=b['border'])
+    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g.get('speaker_radius',g['radius']),fill=b['paper'])
     cx,cy,cw,ch=g['content']
     draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill=b['card'])
     inset=round(30*s);iw=cw-2*inset
@@ -138,13 +145,14 @@ def make_frame(project,lesson,folder,w,h,target=None):
     return g
 
 
-def subtitle_region(w,h):
-    g=geometry(w,h)
+def subtitle_region(w,h,options=None):
+    g=geometry(w,h,options)
+    if g.get('circle'):return (round(w*.025),round(h*.84),round(w*.70),round(h*.16))
     return g['photo'] if g['portrait'] else g['speaker']
 
 
-def subtitle_position(w,h,tw,th):
-    x,y,sw,sh=subtitle_region(w,h)
+def subtitle_position(w,h,tw,th,options=None):
+    x,y,sw,sh=subtitle_region(w,h,options)
     return x+(sw-tw)//2,y+sh-th-round(20*geometry(w,h)['scale'])
 
 def validate_text_layout(project,plan):
@@ -160,7 +168,7 @@ def validate_text_layout(project,plan):
 
 def speaker_focus(project,w,h):
     from statistics import median
-    g=geometry(w,h);_,_,cw,ch=g['speaker']
+    g=geometry(w,h,project['options']);_,_,cw,ch=g['speaker']
     faces=[f['face'] for f in project.get('frames',[]) if f.get('face')]
     fx=median([f['x']+f['w']/2 for f in faces]) if faces else .5
     fy=median([f['y']+f['h']/2 for f in faces]) if faces else .32
@@ -171,5 +179,38 @@ def speaker_focus(project,w,h):
     mw,mh=project['metadata']['width'],project['metadata']['height']
     cover=max(cw/mw,ch/mh)
     # Face detections exclude hair: reserve headroom above the box and subtitle space below.
-    scale=min(cover,ch*.48/max(1,face_h*mh))*options.get('speaker_scale',1)
+    scale=(max(cover,ch*.48/max(1,face_h*mh)) if g.get('circle') else min(cover,ch*.48/max(1,face_h*mh)))*options.get('speaker_scale',1)
     return fx,fy,max(2,round(mw*scale)//2*2),max(2,round(mh*scale)//2*2)
+
+
+def speaker_transform(project,w,h):
+    """One integer crop/pad contract for browser composition and FFmpeg."""
+    _,_,cw,ch=geometry(w,h,project['options'])['speaker']
+    frame=project['options'].get('video_frames',{}).get('9:16' if h>w else '16:9')
+    if frame is None:
+        fx,fy,fw,fh=speaker_focus(project,w,h)
+        left=round((cw-min(fw,cw))/2-max(0,min(fw-min(fw,cw),fw*fx-min(fw,cw)*.5)))
+        top=round((ch-min(fh,ch))/2-max(0,min(fh-min(fh,ch),fh*fy-min(fh,ch)*.42)))
+    else:
+        mw,mh=project['metadata']['width'],project['metadata']['height']
+        circle=geometry(w,h,project['options']).get('circle')
+        if circle:
+            fx,fy,basew,baseh=speaker_focus(project,w,h)
+            scale=max(cw/mw,ch/mh,basew/mw)*frame.get('zoom',1)
+        else:scale=min(cw/mw,ch/mh)*frame.get('zoom',1)
+        fw=max(2,round(mw*scale/2)*2);fh=max(2,round(mh*scale/2)*2)
+        left=round((cw/2-fw*fx if circle else (cw-fw)/2)+frame.get('x',0)*cw)
+        top=round((ch*.46-fh*fy if circle else (ch-fh)/2)+frame.get('y',0)*ch)
+        left=max(1-fw,min(cw-1,left));top=max(1-fh,min(ch-1,top))
+    return {'left':left,'top':top,'width':fw,'height':fh}
+
+
+def speaker_filter(project,w,h):
+    tr=speaker_transform(project,w,h)
+    _,_,cw,ch=geometry(w,h,project['options'])['speaker']
+    left,top,fw,fh=(tr[k] for k in ['left','top','width','height'])
+    cropw=min(fw-max(0,-left),cw-max(0,left))
+    croph=min(fh-max(0,-top),ch-max(0,top))
+    cream=brand()['paper'].replace('#','0x')
+    return (f'scale={fw}:{fh},format=rgba,crop={cropw}:{croph}:{max(0,-left)}:{max(0,-top)},'
+            f'pad={cw}:{ch}:{max(0,left)}:{max(0,top)}:color={cream}')

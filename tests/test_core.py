@@ -44,6 +44,10 @@ class TimelineTests(unittest.TestCase):
 
 class ApiTests(unittest.TestCase):
     def setUp(self):self.client=TestClient(app)
+    def test_health_reports_loaded_server_and_retry_version(self):
+        data=self.client.get('/api/health').json()
+        self.assertEqual(data['version'],app.version)
+        self.assertEqual(data['provider_retry_version'],1)
     def test_settings_never_exposes_keys(self):
         data=self.client.get('/api/settings').json()
         self.assertNotIn('API_KEY',str(data))

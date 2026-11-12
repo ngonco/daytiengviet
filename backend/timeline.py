@@ -50,6 +50,12 @@ class PhotoCrop(BaseModel):
     y: float = Field(default=.5, ge=0, le=1)
     zoom: float = Field(default=1, ge=1, le=3)
 
+class VideoFrame(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    zoom: float = Field(default=1, ge=.25, le=4)
+    x: float = Field(default=0, ge=-1, le=1)
+    y: float = Field(default=0, ge=-1, le=1)
+
 class Lesson(Timed):
     model_config = ConfigDict(extra='ignore',allow_inf_nan=False,str_strip_whitespace=True)
     vi: str = Field(min_length=1, max_length=800)

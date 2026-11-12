@@ -11,6 +11,11 @@ from .store import atomic_json, uid
 from .media import ffmpeg
 from .timeline import cue_words, validate_plan
 
+PROVIDER_RETRY_VERSION = 1
+TRANSIENT_TRANSPORT_ERRORS = (
+    httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError, httpx.ProxyError,
+)
+
 class ProviderError(RuntimeError):
     def __init__(self, provider, status=None, detail=''):
         self.provider, self.status = provider, status
@@ -28,9 +33,11 @@ def request(method, url, provider, context=None, **kwargs):
                 return response
             if response.status_code not in [408, 429, 500, 502, 503, 504] or attempt == 2:
                 raise ProviderError(provider, response.status_code)
-        except (httpx.TimeoutException, httpx.NetworkError):
+        except TRANSIENT_TRANSPORT_ERRORS:
             if attempt == 2:
-                raise ProviderError(provider)
+                raise ProviderError(provider, detail='Kết nối bị gián đoạn. Đã thử 3 lần; tiến độ đã lưu, có thể thử lại.') from None
+        if context and hasattr(context, 'progress'):
+            context.progress(0, f'{provider}: kết nối hoặc dịch vụ tạm gián đoạn; chuẩn bị thử lại lần {attempt + 2}/3')
         for _ in range((attempt + 1) * 10):
             if context:
                 context.check()

@@ -61,6 +61,24 @@ class LivePreviewTests(unittest.TestCase):
         self.request();started=time.perf_counter();r=self.request(sequence=2)
         self.assertEqual(r.status_code,200);self.assertLess(time.perf_counter()-started,.3)
 
+    def test_manual_cuts_and_video_framing_save_without_ai_and_restore(self):
+        options={**self.options,'video_frames':{'9:16':{'zoom':2,'x':.2,'y':-.1},'16:9':{'zoom':.5,'x':0,'y':0}}}
+        plan={**self.plan,'cuts':[{'id':'manual','start':1,'end':3,'reason':'Manual','enabled':True,'locked':True}]}
+        original=copy.deepcopy(store.read(self.id))
+        with patch('backend.providers.chat',side_effect=AssertionError('No AI editing')):
+            r=self.client.put(f'/api/projects/{self.id}/plan',json={'revision':1,'options':options,'plan':plan,'render_preview':False})
+            self.assertEqual(r.status_code,200,r.text)
+            self.assertEqual(r.json()['time_map'][-1]['output_end'],8)
+            scene=self.request(options=options).json()
+        from backend.templates import speaker_transform
+        self.assertEqual(scene['speaker_transform'],speaker_transform({**original,'options':options},scene['width'],scene['height']))
+        self.assertEqual(scene['source']['state'],'original')
+        self.assertEqual(store.jobs(self.id),[])
+        restored=self.client.post(f'/api/projects/{self.id}/restore',json={'revision':1,'render_preview':False})
+        self.assertEqual(restored.status_code,200,restored.text)
+        self.assertEqual(restored.json()['plan']['cuts'],[])
+        self.assertEqual(restored.json()['options']['video_frames'],{})
+
     def test_preview_boxes_are_exact_half_scale_of_export(self):
         for w,h in [(1080,1920),(1920,1080)]:
             full=geometry(w,h);small=geometry(w//2,h//2)

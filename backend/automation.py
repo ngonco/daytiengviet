@@ -39,9 +39,10 @@ def config():
     return json.loads(row[0]) if row else {'folder':'','enabled':False,'message':''}
 
 
-def configure(folder=None,enabled=None,message=None):
+def configure(folder=None,enabled=None,message=None,remove_background=None):
     with store.LOCK:
         value=config()
+        if remove_background is not None:value['remove_background']=bool(remove_background)
         if folder is not None:
             root=Path(folder).expanduser().resolve()
             if not root.is_dir():raise ValueError('Hãy chọn thư mục nguồn đang tồn tại.')
@@ -213,7 +214,7 @@ def dispatch():
                 for candidate in store.listing():
                     opts=candidate.get('options',{});bg=opts.get('background_removal',{})
                     expected='9:16' if candidate['metadata']['duration']<=90 else '16:9'
-                    if candidate.get('diagnostic') or opts.get('layout_mode')!='lesson' or opts.get('ratio')!=expected or opts.get('subtitles')!='bilingual' or not bg.get('enabled') or bg.get('device','cuda')!='cuda':continue
+                    if candidate.get('diagnostic') or opts.get('layout_mode')!='lesson' or opts.get('ratio')!=expected or opts.get('subtitles')!='bilingual' or bool(bg.get('enabled'))!=bool(config().get('remove_background',False)) or bg.get('enabled') and bg.get('device','cuda')!='cuda':continue
                     path=store.data_root()/'projects'/candidate['id']/candidate['source_file']
                     entry=indexed.get(candidate['id'],{})
                     if not path.is_file():continue
@@ -233,7 +234,7 @@ def dispatch():
                     copy.unlink(missing_ok=True);raise ValueError('Source đang thay đổi; hãy thử lại khi chép xong.')
                 # Persist ownership before creation so recovery cannot create duplicate projects.
                 row['project_id']=pid;put(row)
-                project=create(copy,'',Options(ratio='9:16' if meta['duration']<=90 else '16:9',layout_mode='lesson',subtitles='bilingual',background_removal={'enabled':True,'device':'cuda'}),pid,True,request)
+                project=create(copy,'',Options(ratio='9:16' if meta['duration']<=90 else '16:9',layout_mode='lesson',subtitles='bilingual',background_removal={'enabled':bool(config().get('remove_background',False)),'device':'cuda'},video_frames={'9:16':{},'16:9':{}}),pid,True,request)
                 store.update(pid,original_name=source.name,auto_created=True)
                 job=store.jobs(pid)[0]
             row.update(state='running',job_id=job['id'],error=None);put(row)
@@ -243,6 +244,24 @@ def dispatch():
 def publish(project,context,code):
     """Retrying a publication never invokes providers, matting or rendering."""
     with store.LOCK:row=get(code)
+    _publish(project,context,row,put,code)
+
+
+def publish_edited(project,context):
+    """Manual exports reuse saved analysis and publish with an independent retry journal."""
+    row=next((r for r in items() if r.get('project_id')==project['id']),None)
+    if not row:return
+    if Path(row['source']).resolve().is_relative_to(store.data_root().resolve()):return
+    key=project['export']['digest']
+    journal=store.folder(project['id'])/'analysis'/'manual-publications'/f'{key}.json'
+    journal.parent.mkdir(parents=True,exist_ok=True)
+    saved=json.loads(journal.read_text(encoding='utf-8')) if journal.exists() else {'source':row['source']}
+    def save(value):store.atomic_json(journal,value)
+    _publish(project,context,saved,save,'manual-'+project['id']+'-'+key)
+    return saved.get('output')
+
+
+def _publish(project,context,row,save,code):
     source=store.folder(project['id'])/project['export']['file']
     parent=Path(row['source']).parent
     if not parent.is_dir():raise OSError('Thư mục source không còn truy cập được; chưa lưu video cạnh source.')
@@ -253,15 +272,15 @@ def publish(project,context,code):
         ffmpeg(['-xerror','-err_detect','explode','-i',source,'-f','null','-'],context)
         meta=probe(source)
         if abs(meta['duration']-project['export']['duration'])>.15:raise ValueError('Video xuất chưa đủ thời lượng; chưa đánh dấu hoàn tất.')
-        row['verified_export']=expected;put(row)
+        row['verified_export']=expected;save(row)
     if target.exists() and digest(target)==expected:
-        output_record(target);row.update(state='done',output=str(target),error=None);put(row);return
+        output_record(target);row.update(state='done',output=str(target),error=None);save(row);return
     if not row.get('output') or target.exists():
         stem=parent/Path(video_filename(project)).stem;index=1
         # Construct literally so a dotted lesson name is never truncated.
         target=parent/(stem.name+'.mp4')
         while target.exists():index+=1;target=parent/(stem.name+f' ({index}).mp4')
-        row['output']=str(target);put(row)
+        row['output']=str(target);save(row)
     temporary=parent/f'.vietcut-{code}.partial'
     context.check()
     with source.open('rb') as inp,temporary.open('wb') as out:
@@ -273,7 +292,7 @@ def publish(project,context,code):
     else:
         os.link(temporary,target)
         temporary.unlink()
-    output_record(target);row.update(state='done',output=str(target),error=None,message='Đã xuất cạnh source');put(row)
+    output_record(target);row.update(state='done',output=str(target),error=None,message='Đã xuất cạnh source');save(row)
 
 
 def failure(row,exc):

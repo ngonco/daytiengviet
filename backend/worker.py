@@ -116,10 +116,12 @@ def execute(job):
         project=store.update(project['id'],frames=frames)
         preview=job['kind']=='preview'
         result=prepared_render(project,project['plan'],project.get('transcript',{}),context,preview)
-        store.update(project['id'],**{'preview' if preview else 'export':result,'status':'ready'})
+        project=store.update(project['id'],**{'preview' if preview else 'export':result,'status':'ready'})
         if not preview:
-            from .automation import output_record
+            from .automation import output_record,publish_edited
             output_record(context.folder/result['file'])
+            published=publish_edited(project,context)
+            if published:store.update(project['id'],export={**result,'published_file':published})
     else:
         raise ValueError('Tác vụ không hợp lệ')
 
