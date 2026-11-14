@@ -26,7 +26,7 @@ class RestartTests(unittest.TestCase):
             self.assertFalse(restart.ready(8876))
 
     def test_current_editor_marker_required(self):
-        for marker,expected in [(1,False),(2,False),(3,True)]:
+        for marker,expected in [(1,False),(2,False),(3,False),(4,True)]:
             opener=Mock();opener.open.return_value=io.BytesIO(json.dumps({'app':'vietcut','version':'1.5.3','provider_retry_version':1,'assembly_editor_version':marker}).encode())
             with patch.object(restart.urllib.request,'build_opener',return_value=opener),patch.object(restart.time,'monotonic',side_effect=[0,1,46]),patch.object(restart.time,'sleep'):
                 self.assertEqual(restart.ready(8876),expected)

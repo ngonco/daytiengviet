@@ -126,3 +126,19 @@ test('the SSE acknowledgement of an in-flight autosave never reloads the draft o
  events({data:JSON.stringify({revision:2,status:'ready',jobs:[],preview:null,export:m.state.project.export})});m.render();assert.equal(api.requests.length,1);assert.equal(m.state.draft,draft);assert.equal(m.state.playing,true);assert.deepEqual(m.state.seekRequest,seek);
  api.complete(0,m.state.project);await pending;m.render();assert.equal(m.state.draft,draft);assert.equal(m.state.playing,true);assert.equal(m.state.dirty,false);
 });
+
+
+test('no-cut selection immediately restores all cuts, retains source cursor and autosaves the restored draft',async t=>{
+ const api=pendingApi(t),m=setup({cuts:[{id:'manual',start:1,end:3,enabled:true,locked:true,reason:'manual'},{id:'tighten-auto',start:4,end:5,enabled:true,locked:false,reason:'auto'}],cursor:2,current:5});
+ let tree=m.render();tree.find(n=>n.type==='select'&&n.props.value==='strong').props.onChange({target:{value:'none'}});
+ tree=m.render();assert.equal(m.state.options.cut_strength,'none');assert.ok(m.state.draft.cuts.every(c=>!c.enabled));assert.equal(m.state.current,5);assert.equal(live(tree).initialOutput,5);
+ const saved=m.autoTimer().tick();assert.equal(api.requests[0].body.options.cut_strength,'none');assert.ok(api.requests[0].body.plan.cuts.every(c=>!c.enabled));api.complete(0,m.state.project);await saved;
+ timeline(m.render()).onUndo();m.render();assert.ok(m.state.draft.cuts.every(c=>c.enabled));assert.equal(m.state.options.cut_strength,'strong');
+});
+test('portrait layout changes only when explicitly selected and keeps framing controls available',()=>{
+ const m=setup();m.state.options={...m.state.options,ratio:'9:16'};m.state.previewDraft=true;
+ let props=live(m.render());props.onLayoutChange('portrait_layout','circle');props=live(m.render());
+ assert.equal(m.state.options.portrait_layout,'circle');assert.equal(m.state.options.landscape_layout,'circle');assert.equal(m.state.dirty,true);
+ props.onFrameChange('9:16',{zoom:.5,x:.2,y:-.1});props=live(m.render());props.onSizeChange(.4);m.render();
+ assert.deepEqual(m.state.options.video_frames['9:16'],{zoom:.5,x:.2,y:-.1});assert.equal(m.state.options.speaker_size,.4);
+});

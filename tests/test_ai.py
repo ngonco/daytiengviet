@@ -27,4 +27,20 @@ class AiTests(unittest.TestCase):
             self.assertEqual(plan['captions'][0]['vi'],'Xin chào bạn.')
             self.assertTrue(plan['captions'][0]['locked'])
 
+
+    def test_none_ignores_provider_cuts_and_restores_old_locked_cuts_but_keeps_translations(self):
+        with TemporaryDirectory() as tmp:
+            cue={'id':'c0','start':0,'end':2,'vi':'Hello.','original_vi':'Hello.','en':'','locked':False}
+            transcript={'text':'Hello.','captions':[cue],'words':[]}
+            project={'metadata':{'duration':4},'options':{'ratio':'9:16','style':'energetic','density':1,'cut_strength':'none'}}
+            locked={'id':'old','start':1,'end':3,'enabled':True,'locked':True,'reason':'manual'}
+            # A provider proposing even a whole-video removal cannot override none.
+            replies=[(json.dumps({'summary':'Greeting','glossary':[]}),{}),
+                     (json.dumps({'translations':[{'id':'c0','vi':'Xin chào.','en':'Hello.'}],'cuts':[{'start':0,'end':4,'reason':'AI'}],'visuals':[]}),{})]
+            with patch('backend.providers.chat',side_effect=replies) as chat,patch('backend.providers.settings',return_value={}):
+                plan,_,_=analyze(project,transcript,[],Context(Path(tmp)),old_plan={'cuts':[locked]})
+                self.assertEqual(chat.call_count,2)
+            self.assertEqual(len(plan['cuts']),1);self.assertFalse(plan['cuts'][0]['enabled'])
+            self.assertTrue(locked['enabled']);self.assertEqual(plan['captions'][0]['vi'],'Xin chào.')
+
 if __name__=='__main__':unittest.main()

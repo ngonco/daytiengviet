@@ -80,7 +80,7 @@ def ready(port):
     while time.monotonic()<deadline:
         try:
             with opener.open(f'http://127.0.0.1:{port}/api/health',timeout=1) as response:result=json.load(response)
-            if result.get('app')=='vietcut' and result.get('version')=='1.5.3' and result.get('provider_retry_version')==1 and result.get('assembly_editor_version')==3:return True
+            if result.get('app')=='vietcut' and result.get('version')=='1.5.3' and result.get('provider_retry_version')==1 and result.get('assembly_editor_version')==4:return True
         except (OSError,ValueError):pass
         time.sleep(.25)
     return False

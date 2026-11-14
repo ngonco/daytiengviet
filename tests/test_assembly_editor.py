@@ -19,6 +19,7 @@ class AssemblyEditorTests(unittest.TestCase):
                 with patch('backend.app.probe',return_value={'duration':10,'width':1920,'height':1080}):
                     created=create(source,'Test',Options(ratio='16:9',layout_mode='lesson',**supplied))
                 self.assertEqual(created['options']['landscape_layout'],'circle')
+                self.assertEqual(created['options']['portrait_layout'],'circle')
                 self.assertFalse(created['options']['background_removal']['enabled'])
                 self.assertEqual(source.read_bytes(),b'test source')
         self.assertEqual(Options.model_validate({'layout_mode':'lesson'}).landscape_layout,'classic')
@@ -84,5 +85,54 @@ class AssemblyEditorTests(unittest.TestCase):
             retention.archive(pid)
             self.assertEqual(store.listing(),[]);self.assertEqual((Path(tmp)/'trash'/pid/'source.mp4').read_bytes(),b'original')
             retention.restore(pid);self.assertEqual((folder/'source.mp4').read_bytes(),b'original')
+
+
+    def test_portrait_circle_is_opt_in_for_old_projects_and_centered_at_all_sizes(self):
+        from backend.templates import subtitle_region,speaker_filter
+        self.assertEqual(Options(layout_mode='lesson').portrait_layout,'classic')
+        old={'landscape_layout':'circle'}
+        self.assertEqual(geometry(1080,1920,old),geometry(1080,1920))
+        for size in [.15,.25,.4]:
+            opts=Options(layout_mode='lesson',portrait_layout='circle',speaker_size=size,video_frames={'9:16':{}}).model_dump()
+            for w,h in [(1080,1920),(540,960)]:
+                g=geometry(w,h,opts);x,y,d,dh=g['speaker'];cx,cy,cw,ch=g['content']
+                self.assertTrue(g['portrait']);self.assertTrue(g['circle']);self.assertEqual(d,dh)
+                self.assertAlmostEqual(x+d/2,w/2,delta=.5);self.assertAlmostEqual(d/h,size,delta=.002)
+                self.assertLessEqual(cy+ch,y-10);self.assertLessEqual(y+d,h)
+                self.assertEqual(subtitle_region(w,h,opts),g['photo'])
+                sub=subtitle_image({'vi':'Xin chào','en':'Hello'},w,h,options=opts)
+                _,sy=subtitle_position(w,h,*sub.size,opts);self.assertLess(sy+sub.height,cy)
+                with TemporaryDirectory() as tmp:make_frame({'options':opts,'assets':{}},{'vi':'Xin chào','en':'Hello','chunks':[]},Path(tmp),w,h)
+        # Browser transform and FFmpeg crop/pad must stay identical at zoom/drag extremes.
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);Image.new('RGB',(160,90),'blue').save(root/'source.png')
+            for zoom,x,y in [(.25,0,0),(1,.2,-.15),(4,-1,1),(4,1,-1)]:
+                opts['video_frames']['9:16']={'zoom':zoom,'x':x,'y':y}
+                p={'metadata':{'width':160,'height':90},'options':opts};tr=speaker_transform(p,540,960)
+                _,_,cw,ch=geometry(540,960,opts)['speaker'];expected=Image.new('RGB',(cw,ch),'#F7F3EB')
+                expected.paste(Image.new('RGB',(tr['width'],tr['height']),'blue'),(tr['left'],tr['top']))
+                ffmpeg(['-i',root/'source.png','-vf',speaker_filter(p,540,960)+',format=rgb24','-frames:v','1',root/'actual.png'])
+                with Image.open(root/'actual.png') as actual:self.assertIsNone(ImageChops.difference(actual.convert('RGB'),expected).getbbox())
+
+    def test_actual_portrait_circle_export_and_live_scene_agree(self):
+        import hashlib
+        with TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            ffmpeg(['-f','lavfi','-i','color=c=blue:s=160x90:r=30:d=1','-f','lavfi','-i','sine=frequency=400:duration=1','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',folder/'source.mp4'])
+            before=hashlib.sha256((folder/'source.mp4').read_bytes()).hexdigest()
+            lesson={'id':'l','start':0,'end':1,'vi':'Xin chào','en':'Hello','chunks':[],'asset_id':None}
+            plan={'schema_version':2,'lessons':[lesson],'cuts':[],'captions':[{'id':'c','start':0,'end':1,'vi':'Xin chào','en':'Hello'}],'visuals':[]}
+            p={'id':'123456789abcdef0','title':'Synthetic','source_file':'source.mp4','metadata':{'duration':1,'width':160,'height':90},'revision':1,'assets':{},'frames':[],'options':Options(ratio='9:16',layout_mode='lesson',portrait_layout='circle',auto_volume=False,video_frames={'9:16':{}},background_removal={'enabled':False}).model_dump()}
+            ctx=Mock();ctx.folder=folder;ctx.kind='export'
+            result=render_lessons(p,plan,{},ctx,True)
+            self.assertAlmostEqual(result['duration'],1,delta=.04)
+            ffmpeg(['-i',folder/result['file'],'-f','null','-'])
+            ffmpeg(['-i',folder/result['file'],'-frames:v','1',folder/'actual.png'])
+            live=scene(p,folder,lesson,plan['captions'][0]);g=live['geometry'];x,y,d,_=g['speaker']
+            with Image.open(folder/'actual.png') as actual:
+                self.assertEqual(actual.size,(live['width'],live['height']))
+                outside=actual.getpixel((x+2,y+2));inside=actual.getpixel((x+d//2,y+d//2))
+                self.assertGreater(outside[0],180);self.assertGreater(inside[2],inside[0]+100)
+            self.assertEqual(hashlib.sha256((folder/'source.mp4').read_bytes()).hexdigest(),before)
 
 if __name__=='__main__':unittest.main()

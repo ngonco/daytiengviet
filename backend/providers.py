@@ -141,7 +141,7 @@ def transcribe(project, context):
 def analyze(project, transcript, frames, context, edit_request='', old_plan=None):
     duration = project['metadata']['duration']
     folder = context.folder
-    signature = __import__('hashlib').sha256(json.dumps({'version':3,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
+    signature = __import__('hashlib').sha256(json.dumps({'version':4,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
     base_cache = folder / 'analysis' / signature
     if edit_request:
         base_cache = base_cache / ('revision-' + context.job_id)
@@ -195,6 +195,7 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
 '''
         strength=project['options'].get('cut_strength','strong')
         prompt += '\nCUT_STRENGTH='+strength+'. Với mức strong: chủ động bỏ lượt nói vấp/bỏ dở/thu lại; giữ lượt hoàn chỉnh. Rút ngập ngừng và khoảng trống thừa. Vẫn giữ đọc mẫu, lặp để luyện và chờ người học. Không xóa nội dung dạy chỉ để video ngắn hơn.'
+        if strength=='none':prompt += '\nKhông cắt: trả cuts=[]; giữ toàn bộ lời nói, khoảng lặng và lượt nói lại. Vẫn dịch đầy đủ và tạo minh họa.'
         packet = {'window': [start, end], 'overview': overview, 'style': project['options']['style'], 'ratio': project['options']['ratio'], 'density': project['options']['density'], 'captions': captions, 'words': [w for w in transcript['words'] if start <= w['start'] < end], 'current_plan': current, 'EDIT_REQUEST': edit_request}
         messages = [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': prompt + '\nDATA: ' + json.dumps(packet, ensure_ascii=False)}]
         part = None
@@ -209,7 +210,7 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
                 if any(c['id'] not in translations for c in captions):
                     raise ValueError('Thiếu bản dịch cho một số cue')
                 # Validate before caching; AI may not create timestamps outside this video.
-                tentative = {'cuts': [{**c, 'id': f'cut-{index}-{i}'} for i,c in enumerate(part.get('cuts', []))], 'visuals': [{**v, 'id': f'v-{index}-{i}'} for i,v in enumerate(part.get('visuals', []))], 'captions': [{**c, **translations[c['id']]} for c in captions]}
+                tentative = {'cuts': [{**c, 'id': f'cut-{index}-{i}'} for i,c in enumerate([] if strength=='none' else part.get('cuts', []))], 'visuals': [{**v, 'id': f'v-{index}-{i}'} for i,v in enumerate(part.get('visuals', []))], 'captions': [{**c, **translations[c['id']]} for c in captions]}
                 validate_plan(tentative, duration)
                 atomic_json(cache, part)
                 break
@@ -240,6 +241,9 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
             if w['start'] < cut['end'] < w['end']:
                 cut['end'] = max(0, w['start'] - 0.06)
     plan['cuts'] = [c for c in plan['cuts'] if c['end'] - c['start'] >= 0.12]
+    if project['options'].get('cut_strength')=='none':
+        from .recut import restore_all_cuts
+        plan=restore_all_cuts(plan)
     return validate_plan(plan, duration), warnings, vision
 
 def search_photos(query, context=None, portrait=False, per_page=6, page=1):

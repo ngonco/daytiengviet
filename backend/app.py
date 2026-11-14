@@ -38,7 +38,8 @@ class Options(BaseModel):
     speaker_y: float | None=Field(default=None,ge=0,le=1)
     speaker_scale: float=Field(default=1,ge=.65,le=1.5)
     landscape_layout: Literal['classic','circle']='classic'
-    cut_strength: Literal['light','medium','strong']='strong'
+    portrait_layout: Literal['classic','circle']='classic'
+    cut_strength: Literal['none','light','medium','strong']='strong'
     speaker_size: float=Field(default=.25,ge=.15,le=.4)
     video_frames: dict[Literal['9:16','16:9'],VideoFrame]=Field(default_factory=dict)
     background_removal: BackgroundRemoval=Field(default_factory=BackgroundRemoval)
@@ -215,7 +216,9 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
         values['video_frames']={'9:16':VideoFrame().model_dump(),'16:9':VideoFrame().model_dump()}
     # New lesson projects always start with the current teaching layout.
     # Saved/imported versions still decode missing fields as classic.
-    if values.get('layout_mode')=='lesson':values['landscape_layout']='circle'
+    if values.get('layout_mode')=='lesson':
+        values['landscape_layout']='circle'
+        values['portrait_layout']='circle'
     project={'id':project_id,'title':title[:120] or 'Bài học mới','source_file':target.name,'original_name':source.name,'metadata':metadata,'options':values,'status':'new','revision':0,'plan':None,'transcript':None,'assets':{},'frames':[],'warnings':[],'preview':None,'export':None,'music_file':None,'created_at':store.now()}
     project['title_mode']='auto' if title.strip() in ['', 'Bài học mới', 'Bài học tiếng Việt'] else 'manual'
     store.save(project)
@@ -226,7 +229,7 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':3}
+    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':4}
 
 @app.get('/api/projects/{project_id}/waveform')
 def editor_waveform(project_id:str):
@@ -393,7 +396,9 @@ def save_plan(project_id:str,body:SavePlan):
         project=store.read(project_id)
         if body.revision!=project['revision']:
             raise HTTPException(409,'Dự án đã đổi ở cửa sổ khác. Hãy tải lại trước khi lưu.')
-        plan=validate_plan(body.plan,project['metadata']['duration'])
+        from .recut import restore_all_cuts
+        proposed=restore_all_cuts(body.plan) if body.options.cut_strength=='none' else body.plan
+        plan=validate_plan(proposed,project['metadata']['duration'])
         for visual in [*plan['visuals'],*plan['lessons']]:
             if visual.get('asset_id') and visual['asset_id'] not in project['assets']:
                 raise ValueError('Ảnh chưa được tải vào dự án.')

@@ -6,7 +6,7 @@ import numpy as np
 from .media import ffmpeg
 from .timeline import validate_plan,keep_spans
 
-VERSION=2
+VERSION=3
 LEVELS={'light':(1.2,.45),'medium':(.85,.35),'strong':(.6,.25)}
 PRACTICE=re.compile(r'repeat|your turn|say it|say after|try it|practice|practise|listen and|read aloud|nhắc lại|đọc theo|lặp lại|luyện|đến lượt',re.I)
 def text(value):return ' '.join(re.findall(r'\w+',value.lower(),re.UNICODE))
@@ -33,7 +33,13 @@ def quiet_intervals(source,context):
                 start=None
         return spans
 
+def restore_all_cuts(plan):
+    result=copy.deepcopy(plan)
+    for cut in result.get('cuts',[]):cut['enabled']=False
+    return result
+
 def propose(plan,transcript,duration,silences,strength='strong'):
+    if strength=='none':return restore_all_cuts(plan)
     result=copy.deepcopy(plan);words=sorted(transcript.get('words',[]),key=lambda w:w['start'])
     minimum,keep=LEVELS[strength];candidates=[]
     # Respect enabled AND restored manual cuts; regeneration replaces only our unlocked cuts.
@@ -79,6 +85,9 @@ def propose(plan,transcript,duration,silences,strength='strong'):
     return result
 
 def recut(project,context):
+    if project['options'].get('cut_strength')=='none':
+        context.progress(4,'Giữ nguyên toàn bộ video · khôi phục mọi đoạn cắt')
+        return restore_all_cuts(project['plan'])
     context.progress(4,'Đo khoảng dừng và kiểm tra lượt nói lại')
     intervals=quiet_intervals(context.folder/project['source_file'],context)
     plan=propose(project['plan'],project.get('transcript') or {},project['metadata']['duration'],intervals,project['options'].get('cut_strength','strong'))

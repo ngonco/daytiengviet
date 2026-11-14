@@ -39,3 +39,39 @@ class RecutTests(unittest.TestCase):
   words=[{'word':w,'start':1+i*.3,'end':1.2+i*.3} for i,w in enumerate(first+second)]
   r=propose(plan(),{'words':words},12,[])
   self.assertEqual(len(r['cuts']),1);self.assertLess(r['cuts'][0]['start'],1)
+
+ def test_none_restores_all_cuts_without_mutating_other_content_or_decoding(self):
+  from backend.recut import recut
+  from unittest.mock import patch,Mock
+  p=plan();p['pauses']=[{'id':'hold','at':5,'duration':2}]
+  p['cuts']=[{'id':'manual','start':1,'end':3,'enabled':True,'locked':True},
+             {'id':'tighten-auto','start':4,'end':6,'enabled':True,'locked':False},
+             {'id':'restored','start':8,'end':9,'enabled':False,'locked':True}]
+  before=copy.deepcopy(p)
+  with patch('backend.recut.quiet_intervals') as decode:
+   result=recut({'plan':p,'options':{'cut_strength':'none'}},Mock())
+   decode.assert_not_called()
+  self.assertFalse(any(c['enabled'] for c in result['cuts']))
+  self.assertEqual(sum(s['end']-s['start'] for s in keep_spans(12,result['cuts'])),12)
+  self.assertEqual({k:v for k,v in result.items() if k!='cuts'},{k:v for k,v in p.items() if k!='cuts'})
+  self.assertEqual(p,before)
+  self.assertEqual(propose(result,{},12,[(0,12)],'none'),result)
+
+ def test_save_none_restores_locked_cuts_and_preserves_version(self):
+  from pathlib import Path
+  from tempfile import TemporaryDirectory
+  from unittest.mock import patch
+  from backend import store
+  from backend.app import save_plan,SavePlan,Options
+  with TemporaryDirectory() as tmp,patch('backend.store.data_root',return_value=Path(tmp)):
+   store.init();pid='a123456789abcdef';p=plan()
+   p['cuts']=[{'id':'manual','start':1,'end':3,'enabled':True,'locked':True}]
+   store.save({'id':pid,'title':'Synthetic','source_file':'source.mp4','options':Options(layout_mode='lesson').model_dump(),
+               'metadata':{'duration':12,'width':320,'height':180},'plan':p,'assets':{},'revision':1})
+   result=save_plan(pid,SavePlan(revision=1,plan=p,options=Options(layout_mode='lesson',cut_strength='none'),render_preview=False))
+   self.assertFalse(result['plan']['cuts'][0]['enabled'])
+   self.assertEqual(result['options']['cut_strength'],'none')
+   import json
+   old=json.loads((store.folder(pid)/'versions/v00001.json').read_text(encoding='utf-8'))
+   self.assertTrue(old['plan']['cuts'][0]['enabled'])
+   self.assertEqual(store.jobs(),[])

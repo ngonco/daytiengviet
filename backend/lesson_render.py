@@ -9,7 +9,7 @@ from .media import ffmpeg
 from .store import atomic_json
 from .templates import geometry,signature,make_frame,rounded_mask,speaker_transform,speaker_filter,font,fit_text,subtitle_region,subtitle_position
 
-LESSON_RENDER_VERSION=9
+LESSON_RENDER_VERSION=10
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -27,7 +27,7 @@ def mapped_lessons(plan,spans):
 def subtitle_image(caption,w,h,target=None,options=None):
     g=geometry(w,h,options);_,_,sw,sh=subtitle_region(w,h,options);s=g['scale']
     width=sw-round(40*s);padding=max(4,round(12*s))
-    max_height=sh*(.95 if g.get('circle') else .34)
+    max_height=sh*(.95 if g.get('circle') and not g['portrait'] else .34)
     vi_font,vi_lines,vi_lh=fit_text(caption['vi'],width-2*padding,max_height*.53-2*padding,32*s,24*s,True,max_lines=2)
     en_text=caption.get('en','')
     if en_text:

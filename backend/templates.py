@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .photo_layout import cover
 from .config import ROOT
 
-TEMPLATE_VERSION=5
+TEMPLATE_VERSION=6
 FONT_DIR=ROOT/'assets/fonts'
 
 def brand():
@@ -38,8 +38,13 @@ def geometry(w,h,options=None):
         # Only the output canvas needs even dimensions for H.264. Rounding each
         # inner box to even pixels shifts/crops the half-size live preview.
         return tuple(round(value*scale) for value,scale in [(x,sx),(y,sy),(rw,sx),(rh,sy)])
-    circle=not portrait and (options or {}).get('landscape_layout')=='circle'
-    diameter=round(1080*(options or {}).get('speaker_size',.25))
+    circle=(options or {}).get('portrait_layout' if portrait else 'landscape_layout')=='circle'
+    diameter=round(ref_h*(options or {}).get('speaker_size',.25))
+    if circle and portrait:
+        return {'portrait':True,'speaker':rect((1080-diameter)/2,1860-diameter,diameter,diameter),
+                'content':rect(46,692,988,min(484,1860-diameter-24-692)),'photo':rect(46,96,988,566),
+                'brand':rect(46,26,988,52),'radius':round(36*min(sx,sy)),
+                'speaker_radius':round(diameter*min(sx,sy)/2),'scale':min(sx,sy),'circle':True}
     if circle:
         return {'portrait':False,'speaker':rect(1920-40-diameter,1080-40-diameter,diameter,diameter),
                 'content':rect(1000,100,880,min(625,910-diameter)),'photo':rect(40,100,920,800),
@@ -147,7 +152,7 @@ def make_frame(project,lesson,folder,w,h,target=None):
 
 def subtitle_region(w,h,options=None):
     g=geometry(w,h,options)
-    if g.get('circle'):return (round(w*.025),round(h*.84),round(w*.70),round(h*.16))
+    if g.get('circle') and not g['portrait']:return (round(w*.025),round(h*.84),round(w*.70),round(h*.16))
     return g['photo'] if g['portrait'] else g['speaker']
 
 
