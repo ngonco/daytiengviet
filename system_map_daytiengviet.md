@@ -400,3 +400,11 @@ Only code, blank configuration, documentation, licensed template/font assets and
 - Windows test-only workaround: ordinary TestClient loop startup stalled under restricted socket support, so the broader ASGI tests used an ignored OUTPUT polling event loop without changing application code. One warm-latency assertion was 329ms with a 10ms test polling tick; it passed alone after reducing that test-only tick to 1ms. All other broader assertions passed on the first complete run.
 
 - Delivery checks: all 14 explicit staged source/doc/test paths were inspected; staged credential/private-data scan and git diff --cached --check passed. Unrelated untracked files were excluded. The guarded restart helper could not verify the running server and refused to stop any process. This session has not activated the new Python runtime; save any open draft, invoke KHOI_DONG_LAI_VIETCUT.cmd from the normal desktop session, then reload the browser to load marker 4.
+
+
+## User-authorized existing portrait conversion (2026-11-14)
+
+- User explicitly overrides opt-in preservation for ALL existing active 9:16 projects in the workspace. The live marker-4 API was verified, and all seven eligible, idle lesson projects were saved through PUT /plan with only portrait_layout changed to circle and render_preview=false. Each revision advanced once and the previous plan/options version was verified (old missing options normalized through Options for compatibility).
+- All seven preserved cuts, captions, lessons, inserted silence, other existing options, previous preview/export metadata and original source SHA256. No STT, provider, matting or MP4 render was requested. Landscape projects and Trash were untouched. Private before/after audit remains only in ignored OUTPUT/portrait-circle-validation. Existing encoded MP4s retain their old composition until explicitly re-exported; live composition uses the newly saved circle options.
+
+- Live preview-scene responses verified all seven circles are square, centered horizontally and placed in the lower half. Production frontend build passed. No source-code change was required for this authorized data operation.
