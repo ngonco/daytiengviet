@@ -229,7 +229,7 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':4}
+    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':5}
 
 @app.get('/api/projects/{project_id}/waveform')
 def editor_waveform(project_id:str):
@@ -307,6 +307,16 @@ def upload(file:UploadFile=File(...),title:str=Form('Bài học mới'),options:
 @app.get('/api/projects/{project_id}')
 def get_project(project_id:str):
     return project_read(project_id)
+
+@app.delete('/api/projects/{project_id}')
+def delete_project(project_id:str):
+    from .retention import archive
+    with store.LOCK:
+        try:archive(project_id)
+        except OSError as exc:
+            raise ValueError('Tệp dự án đang được sử dụng. Hãy dừng phát video và thử xoá lại.') from exc
+        project=store.read(project_id,True)
+    return {'id':project_id,'trashed':True,'purge_after':project['_retention']['purge_after']}
 
 @app.get('/api/projects/{project_id}/audio-level')
 def audio_level(project_id:str):

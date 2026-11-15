@@ -142,3 +142,36 @@ test('portrait layout changes only when explicitly selected and keeps framing co
  props.onFrameChange('9:16',{zoom:.5,x:.2,y:-.1});props=live(m.render());props.onSizeChange(.4);m.render();
  assert.deepEqual(m.state.options.video_frames['9:16'],{zoom:.5,x:.2,y:-.1});assert.equal(m.state.options.speaker_size,.4);
 });
+function deleteApi(t,{confirm=true,status=200}={}){
+ const originals={fetch:globalThis.fetch,window:globalThis.window,localStorage:globalThis.localStorage};
+ const requests=[],prompts=[],storage=new Map([['vietcut-project','synthetic']]);
+ globalThis.window={confirm:message=>{prompts.push(message);return confirm}};
+ globalThis.localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
+ globalThis.fetch=async(url,init)=>{requests.push({url,method:init?.method||'GET'});return {ok:status===200,status,json:async()=>status!==200?{detail:'Dự án đang có tác vụ'}:init?.method==='DELETE'?{id:'synthetic',trashed:true}:[]}};
+ t.after(()=>{for(const [key,value] of Object.entries(originals))if(value===undefined)delete globalThis[key];else globalThis[key]=value});
+ return {requests,prompts,storage};
+}
+const deleteButton=tree=>tree.find(n=>n.type==='button'&&n.props['aria-label']==='Xoá dự án Test');
+test('delete confirmation cancels without requests or draft changes',async t=>{
+ const api=deleteApi(t,{confirm:false}),m=setup();const draft=m.state.draft;
+ assert.ok(m.render().find(n=>n.type==='button'&&n.props['aria-label']==='Xoá dự án đang mở'));
+ await deleteButton(m.render()).props.onClick();assert.equal(api.requests.length,0);assert.equal(m.state.project.trashed,undefined);assert.equal(m.state.draft,draft);assert.match(api.prompts[0],/7 ngày/);
+});
+test('deleting current project preserves dirty draft for recovery and stops autosave',async t=>{
+ const api=deleteApi(t),m=setup();timeline(m.render()).onInsertSilence(2);m.render();m.state.playing=true;
+ const draft=m.state.draft;await deleteButton(m.render()).props.onClick();m.render();
+ assert.equal(api.requests[0].method,'DELETE');assert.equal(api.requests[0].url,'/api/projects/synthetic');
+ assert.equal(m.state.project.trashed,true);assert.equal(m.state.projects.length,0);assert.equal(m.state.dirty,true);
+ assert.equal(m.state.draft,draft);assert.equal(m.state.playing,false);assert.equal(api.storage.has('vietcut-project'),false);
+ assert.match(api.prompts[0],/Bản nháp chưa lưu/);await m.autoTimer().tick();assert.equal(api.requests.length,2);
+});
+test('busy/in-flight save blocks deletion and server refusal retains active project',async t=>{
+ const api=deleteApi(t,{status:400}),m=setup();const draft=m.state.draft;
+ m.state.pending='save';assert.equal(deleteButton(m.render()).props.disabled,true);
+ await deleteButton(m.render()).props.onClick();assert.equal(api.requests.length,0);
+ m.state.pending='';m.state.project.jobs=[{id:'job',status:'queued',kind:'export'}];
+ assert.equal(deleteButton(m.render()).props.disabled,true);await deleteButton(m.render()).props.onClick();assert.equal(api.requests.length,0);
+ m.state.project.jobs=[];await deleteButton(m.render()).props.onClick();
+ assert.equal(m.state.project.trashed,undefined);assert.equal(m.state.projects.length,1);assert.equal(m.state.draft,draft);
+ assert.match(m.state.error,/tác vụ/);assert.equal(api.storage.get('vietcut-project'),'synthetic');
+});

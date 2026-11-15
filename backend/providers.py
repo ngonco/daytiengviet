@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 import math
 import re
@@ -141,7 +142,7 @@ def transcribe(project, context):
 def analyze(project, transcript, frames, context, edit_request='', old_plan=None):
     duration = project['metadata']['duration']
     folder = context.folder
-    signature = __import__('hashlib').sha256(json.dumps({'version':4,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
+    signature = __import__('hashlib').sha256(json.dumps({'version':5,'captions':transcript['captions'],'options':project['options']},sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:16]
     base_cache = folder / 'analysis' / signature
     if edit_request:
         base_cache = base_cache / ('revision-' + context.job_id)
@@ -194,7 +195,7 @@ def analyze(project, transcript, frames, context, edit_request='', old_plan=None
 Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ngắn. Video có thể giảng bằng tiếng Anh xen ví dụ tiếng Việt. Cần vi=tiếng Việt, en=tiếng Anh cho MỌI cue. Với phần nói tiếng Việt, giữ nguyên trong vi; với phần nói tiếng Anh, giữ nguyên trong en và dịch sang vi. Có thể sửa lỗi nhận diện RÕ RÀNG dựa vào ngữ cảnh (ví dụ "phrase" thay vì "praise"), nhưng không biến một từ nghe không rõ thành nội dung dạy mới. Từ không chắc không được đưa lên thẻ kiến thức. Ảnh phải minh họa đúng từ/câu, không ảnh trang trí vô nghĩa. Vocab/title để giải thích ngữ pháp, phát âm, thanh điệu hoặc từ trừu tượng. Tối đa 1 visual mỗi 6 giây cho sôi động, mỗi 12 giây cho giáo dục, điều chỉnh theo density. Thời lượng mỗi visual 2-5 giây. Không để các visual chồng nhau. Toàn khung chỉ ở đoạn minh họa, không che miệng khi dạy phát âm. Cuts chỉ bao gồm nói vấp, câu thừa thực sự và khoảng lặng không dùng luyện nói; nếu không chắc thì không cắt. Giữ các lượt nói mẫu và nhắc lại để học. Không cắt giữa từ; bám mốc thời gian cue/word, chừa 0.08s đầu/cuối từ. EDIT_REQUEST chỉ sửa yêu cầu được nêu, giữ nguyên các nội dung khác trong current_plan và mọi locked=true.
 '''
         strength=project['options'].get('cut_strength','strong')
-        prompt += '\nCUT_STRENGTH='+strength+'. Với mức strong: chủ động bỏ lượt nói vấp/bỏ dở/thu lại; giữ lượt hoàn chỉnh. Rút ngập ngừng và khoảng trống thừa. Vẫn giữ đọc mẫu, lặp để luyện và chờ người học. Không xóa nội dung dạy chỉ để video ngắn hơn.'
+        prompt += '\nCUT_STRENGTH='+strength+'. Luôn trả cuts=[] ở bước dịch/minh họa này. Bộ cắt chung sẽ đo âm thanh và kiểm tra ngữ cảnh riêng: chỉ bỏ lặp từ do nói vấp và ngập ngừng TRÊN 3 giây trong phần giải thích. Giữ nguyên khoảng nghỉ đọc mẫu, dịch, luyện tập giữa mọi ngôn ngữ. Không bỏ câu nói lại hoàn chỉnh.'
         if strength=='none':prompt += '\nKhông cắt: trả cuts=[]; giữ toàn bộ lời nói, khoảng lặng và lượt nói lại. Vẫn dịch đầy đủ và tạo minh họa.'
         packet = {'window': [start, end], 'overview': overview, 'style': project['options']['style'], 'ratio': project['options']['ratio'], 'density': project['options']['density'], 'captions': captions, 'words': [w for w in transcript['words'] if start <= w['start'] < end], 'current_plan': current, 'EDIT_REQUEST': edit_request}
         messages = [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': prompt + '\nDATA: ' + json.dumps(packet, ensure_ascii=False)}]
@@ -210,7 +211,7 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
                 if any(c['id'] not in translations for c in captions):
                     raise ValueError('Thiếu bản dịch cho một số cue')
                 # Validate before caching; AI may not create timestamps outside this video.
-                tentative = {'cuts': [{**c, 'id': f'cut-{index}-{i}'} for i,c in enumerate([] if strength=='none' else part.get('cuts', []))], 'visuals': [{**v, 'id': f'v-{index}-{i}'} for i,v in enumerate(part.get('visuals', []))], 'captions': [{**c, **translations[c['id']]} for c in captions]}
+                tentative = {'cuts': [], 'visuals': [{**v, 'id': f'v-{index}-{i}'} for i,v in enumerate(part.get('visuals', []))], 'captions': [{**c, **translations[c['id']]} for c in captions]}
                 validate_plan(tentative, duration)
                 atomic_json(cache, part)
                 break
@@ -223,7 +224,7 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
         plan['cuts'].extend(tentative['cuts'])
         plan['visuals'].extend(tentative['visuals'])
     # A locked object is always copied verbatim, independently of model behavior.
-    for name in ['cuts', 'captions', 'visuals']:
+    for name in ['captions', 'visuals']:
         locked = [item for item in old_plan.get(name, []) if item.get('locked')]
         for item in locked:
             if name == 'captions':
@@ -231,16 +232,9 @@ Dịch ĐỦ từng cue theo ID, dùng ngữ cảnh toàn câu cho các cụm ng
             else:
                 plan[name] = [i for i in plan[name] if i['end'] <= item['start'] or i['start'] >= item['end']]
             plan[name].append(item)
-    # Snap a proposed cut away from a word it would otherwise truncate.
-    for cut in plan['cuts']:
-        if cut.get('locked'):
-            continue
-        for w in transcript['words']:
-            if w['start'] < cut['start'] < w['end']:
-                cut['start'] = min(duration, w['end'] + 0.06)
-            if w['start'] < cut['end'] < w['end']:
-                cut['end'] = max(0, w['start'] - 0.06)
-    plan['cuts'] = [c for c in plan['cuts'] if c['end'] - c['start'] >= 0.12]
+    # Revising an existing project never reapplies the new cut policy implicitly.
+    # Only explicit recut replaces automatic cuts; manual and disabled cuts survive revisions.
+    plan['cuts']=copy.deepcopy(old_plan.get('cuts',[]))
     if project['options'].get('cut_strength')=='none':
         from .recut import restore_all_cuts
         plan=restore_all_cuts(plan)

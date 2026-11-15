@@ -107,5 +107,59 @@ class RetentionTests(unittest.TestCase):
         restored=client.post(f'/api/trash/{ids[0]}/restore');self.assertEqual(restored.status_code,200,restored.text)
         self.assertEqual(restored.json()['id'],ids[0])
 
+    def test_listing_is_newest_creation_first_even_after_edit_and_restore(self):
+        from backend.app import projects
+        ids=[self.add(i) for i in [1,2,3]]
+        store.update(ids[0],title='Edited')
+        self.assertEqual([p['id'] for p in projects()],ids[::-1])
+        retention.archive(ids[1]);retention.restore(ids[1])
+        self.assertEqual([p['id'] for p in projects()],ids[::-1])
+        # Undated/malformed legacy dates have stable placement, independent of saves.
+        p=store.read(ids[0]);p.pop('created_at');store.save(p)
+        store.update(ids[2],created_at='invalid')
+        before=[p['id'] for p in store.listing()]
+        store.update(ids[0],title='Edited again')
+        self.assertEqual([p['id'] for p in store.listing()],before)
+        self.assertEqual(before[0],ids[1])
+
+    def test_delete_api_preserves_source_and_versions_in_seven_day_trash(self):
+        from backend.app import delete_project,restore_trash
+        pid=self.add(1);folder=store.folder(pid);(folder/'versions').mkdir()
+        (folder/'versions/v00001.json').write_text('{"revision":1}')
+        created=store.read(pid)['created_at']
+        result=delete_project(pid)
+        self.assertTrue(result['trashed']);self.assertEqual(store.listing(),[])
+        info=store.read(pid,True)['_retention']
+        self.assertEqual(retention.timestamp(info['purge_after'])-retention.timestamp(info['deleted_at']),timedelta(days=7))
+        self.assertEqual((self.root/'trash'/pid/'source.mp4').read_bytes(),b'private source')
+        self.assertEqual((self.root/'trash'/pid/'versions/v00001.json').read_text(),'{"revision":1}')
+        restored=restore_trash(pid)
+        self.assertEqual(restored['created_at'],created)
+        self.assertEqual((store.folder(pid)/'source.mp4').read_bytes(),b'private source')
+
+    def test_explicit_delete_refuses_busy_and_rolls_back_windows_rename_failure(self):
+        from backend.app import delete_project
+        pid=self.add(1);job=store.job_create(pid,'export')
+        with self.assertRaisesRegex(ValueError,'tác vụ'):delete_project(pid)
+        self.assertNotIn('_retention',store.read(pid))
+        store.job_update(job['id'],status='succeeded')
+        with patch('pathlib.Path.rename',side_effect=PermissionError('Synthetic locked file')):
+            with self.assertRaisesRegex(ValueError,'đang được sử dụng'):delete_project(pid)
+        self.assertNotIn('_retention',store.read(pid))
+        self.assertEqual((store.folder(pid)/'source.mp4').read_bytes(),b'private source')
+
+    def test_delete_http_route_busy_read_block_and_restore(self):
+        pid=self.add(1);client=TestClient(app);job=store.job_create(pid,'export')
+        self.assertEqual(client.delete(f'/api/projects/{pid}').status_code,400)
+        store.job_update(job['id'],status='succeeded')
+        response=client.delete(f'/api/projects/{pid}')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(response.json()['trashed'])
+        self.assertEqual(client.get('/api/projects').json(),[])
+        self.assertEqual(client.get(f'/api/projects/{pid}').status_code,410)
+        self.assertEqual(client.post(f'/api/projects/{pid}/jobs/pipeline').status_code,410)
+        self.assertEqual(client.post(f'/api/trash/{pid}/restore').status_code,200)
+        self.assertEqual(client.get(f'/api/projects/{pid}').status_code,200)
+
 
 if __name__=='__main__':unittest.main()

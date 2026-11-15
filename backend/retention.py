@@ -107,7 +107,7 @@ def sweep(protect=None,at=None):
                     safe_path(project['id'],'trash');project['_retention']={**info,'state':'purging'};store.save(project);_finish(project,at);purged.append(project['id'])
                 except (OSError,ValueError) as exc:notes.append(str(exc))
         active=[p for p in store.listing() if not p.get('diagnostic')]
-        eligible=sorted([p for p in active if p['id'] not in protected and not busy(p['id'])],key=lambda p:(timestamp(p.get('created_at') or p.get('updated_at')),p['id']))
+        eligible=sorted([p for p in active if p['id'] not in protected and not busy(p['id'])],key=store.creation_key)
         for project in eligible:
             if len(active)-len(moved)<=LIMIT:break
             try:
@@ -148,9 +148,9 @@ def archive(project_id,at=None):
     at=at or datetime.now(timezone.utc)
     with store.LOCK:
         project=store.read(project_id)
-        if busy(project_id):raise ValueError('Project still has active work; cancel it before moving to Trash.')
+        if busy(project_id):raise ValueError('Dự án đang có tác vụ. Hãy đợi hoặc hủy tác vụ trước khi xoá.')
         safe_path(project_id,'projects');target=safe_path(project_id,'trash')
-        if target.exists():raise ValueError('Trash destination already exists.')
+        if target.exists():raise ValueError('Thùng rác đã có thư mục dự án này; chưa chuyển để tránh ghi đè.')
         project['_retention']={'state':'archiving','deleted_at':at.isoformat(),'purge_after':(at+timedelta(days=DAYS)).isoformat()}
         store.save(project)
         try:_finish(project,at)

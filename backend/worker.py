@@ -100,17 +100,17 @@ def execute(job):
             else:
                 assets,photo_warnings=fetch_assets(project,plan,context,vision)
             plan['pauses']=(project.get('plan') or {}).get('pauses',[])
+            # New initial plans use the shared policy before committing a revision.
+            # Retry/export/revise of saved projects must not silently change their cuts.
+            if job['kind']=='pipeline' and not project.get('plan'):
+                from .recut import recut
+                plan=recut({**project,'plan':plan},context)
+                context.check()
             # For a conversion, save the previous layout before changing options.
             version(store.read(project['id']) if job['kind']=='reframe' else project)
             project=store.update(project['id'],plan=plan,options=project['options'],assets=assets,warnings=warnings+photo_warnings,vision_supported=vision,revision=project['revision']+1)
         else:
             plan=project['plan']
-        if job['kind']!='reframe':
-            from .recut import recut
-            cut_plan=recut({**project,'plan':plan},context)
-            if cut_plan!=plan:
-                context.check();version(project)
-                plan=cut_plan;project=store.update(project['id'],plan=plan,revision=project['revision']+1)
         if project.get('title_mode')=='auto':
             from .seo import lesson_title
             project=store.update(project['id'],title=lesson_title(project))

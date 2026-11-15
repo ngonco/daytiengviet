@@ -12,6 +12,18 @@ class Context:
     def progress(self,*args):pass
 
 class AiTests(unittest.TestCase):
+    def test_shared_cut_policy_cannot_be_bypassed_by_provider_and_old_cuts_survive_revision(self):
+        for old_plan in [None,{'cuts':[{'id':'cut-0-0','start':1,'end':3,'reason':'Old cut','enabled':False,'locked':False}]}]:
+            with self.subTest(old_plan=old_plan),TemporaryDirectory() as tmp:
+                cue={'id':'c0','start':0,'end':2,'vi':'Hello.','original_vi':'Hello.','en':'','locked':False}
+                transcript={'captions':[cue],'words':[]}
+                project={'metadata':{'duration':4},'options':{'ratio':'9:16','style':'energetic','density':1,'cut_strength':'strong'}}
+                replies=[(json.dumps({'summary':'Greeting','glossary':[]}),{}),
+                         (json.dumps({'translations':[{'id':'c0','vi':'Xin chào.','en':'Hello.'}],'cuts':[{'start':0,'end':4,'reason':'AI'}],'visuals':[]}),{})]
+                with patch('backend.providers.chat',side_effect=replies),patch('backend.providers.settings',return_value={}):
+                    plan,_,_=analyze(project,transcript,[],Context(Path(tmp)),old_plan=old_plan)
+                self.assertEqual(plan['cuts'],(old_plan or {}).get('cuts',[]))
+
     def test_vision_rejection_and_invalid_json_recover_without_losing_locked_caption(self):
         with TemporaryDirectory() as tmp:
             folder=Path(tmp);(folder/'frames').mkdir();(folder/'frames'/'f001.jpg').write_bytes(b'test-image')

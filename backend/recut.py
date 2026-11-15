@@ -1,4 +1,4 @@
-"""Local, source-timed recutting. Audio evidence wins over coarse STT word durations."""
+"""Source-timed recutting: audio/word evidence, then conservative semantic review."""
 import copy,hashlib,math,re
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -6,22 +6,23 @@ import numpy as np
 from .media import ffmpeg
 from .timeline import validate_plan,keep_spans
 
-VERSION=3
-LEVELS={'light':(1.2,.45),'medium':(.85,.35),'strong':(.6,.25)}
-PRACTICE=re.compile(r'repeat|your turn|say it|say after|try it|practice|practise|listen and|read aloud|nhắc lại|đọc theo|lặp lại|luyện|đến lượt',re.I)
+VERSION=4
+# All levels obey >3s; strength changes only the breathing space left behind.
+LEVELS={'light':.45,'medium':.35,'strong':.25}
+PRACTICE=re.compile(r'repeat|your turn|say it|say after|try it|practi[cs]e|listen and|read aloud|nhắc lại|đọc theo|lặp lại|luyện|đến lượt',re.I)
+
 def text(value):return ' '.join(re.findall(r'\w+',value.lower(),re.UNICODE))
-def practice_at(words,point):
-    return bool(PRACTICE.search(' '.join(w['word'] for w in words if point-8<=w['start']<=point)))
+
 def quiet_intervals(source,context):
     with TemporaryDirectory() as tmp:
         raw=Path(tmp)/'audio.pcm'
         ffmpeg(['-i',source,'-vn','-ac','1','-ar','16000','-f','s16le',raw],context)
-        # Streaming 20ms windows; only scalar levels are retained.
         levels=[]
         with raw.open('rb') as stream:
             while block:=stream.read(640):
                 a=np.frombuffer(block,dtype='<i2').astype(np.float32)/32768
                 levels.append((float(np.sqrt(np.mean(a*a))),float(np.max(np.abs(a)))))
+                if context and len(levels)%500==0:context.check()
         if not levels:return []
         threshold=min(10**(-34/20),max(10**(-44/20),float(np.percentile([v[0] for v in levels],15))*1.8))
         spans=[];start=None
@@ -38,57 +39,89 @@ def restore_all_cuts(plan):
     for cut in result.get('cuts',[]):cut['enabled']=False
     return result
 
-def propose(plan,transcript,duration,silences,strength='strong'):
-    if strength=='none':return restore_all_cuts(plan)
-    result=copy.deepcopy(plan);words=sorted(transcript.get('words',[]),key=lambda w:w['start'])
-    minimum,keep=LEVELS[strength];candidates=[]
-    # Respect enabled AND restored manual cuts; regeneration replaces only our unlocked cuts.
-    original=[c for c in result.get('cuts',[]) if c.get('locked') or not c['id'].startswith('tighten-')]
-    def add(a,b,reason):
-        a=math.ceil(max(0,a)*30-1e-6)/30;b=math.floor(min(duration,b)*30+1e-6)/30
-        if b-a<.12:return
-        if any(c.get('locked') and a<c['end'] and b>c['start'] for c in original):return
-        candidate={'id':'tighten-'+hashlib.sha256(f'{a:.6f}:{b:.6f}'.encode()).hexdigest()[:14],'start':a,'end':b,'reason':reason,'enabled':True,'locked':False}
-        if keep_spans(duration,original+candidates+[candidate]) and sum(s['end']-s['start'] for s in keep_spans(duration,original+candidates+[candidate]))>=min(.5,duration):candidates.append(candidate)
-    for a,b in silences:
-        if b-a<minimum or practice_at(words,a):continue
-        add(a+keep/2,b-keep/2,'Rút khoảng dừng thừa · '+strength)
-    # Exact nearby retakes of long clauses. Short teaching targets and practice remain protected.
+def automatic(cut):
+    return cut['id'].startswith('tighten-') or bool(re.fullmatch(r'cut-\d+-\d+',cut['id']))
+
+def candidates(plan,transcript,duration,silences,strength='strong'):
+    """Only propose measured gaps and immediate short duplicates, never whole retakes."""
+    if strength=='none':return []
+    words=sorted(transcript.get('words',[]),key=lambda w:w['start'])
     tokens=[text(w['word']) for w in words]
-    targets=[text(l['vi']).split() for l in plan.get('lessons',[])]
-    occupied=-1
+    targets=set()
+    for item in [*plan.get('lessons',[]),*plan.get('glossary',[])]:
+        for part in [item,*item.get('chunks',[])]:
+            targets.update(text(part.get(lang,'')) for lang in ['vi','en'])
+    targets.discard('')
+    # Exact spoken target matches protect BOTH languages, including adjacent repetitions.
+    protected=set()
+    for target in targets:
+        phrase=target.split();n=len(phrase)
+        for i in range(len(tokens)-n+1):
+            if tokens[i:i+n]==phrase:protected.update(range(i,i+n))
+    original=[c for c in plan.get('cuts',[]) if c.get('locked') or not automatic(c)]
+    result=[]
+    def add(a,b,kind,left,right):
+        a=math.ceil(max(0,a)*30-1e-6)/30;b=math.floor(min(duration,b)*30+1e-6)/30
+        if b-a<.12 or any(c.get('locked') and a<c['end'] and b>c['start'] for c in original):return
+        # Word-index context survives arbitrarily long learner waits; no eight-second expiry.
+        before=words[max(0,left-35):left+1];after=words[right:right+36]
+        if not before or not after:return
+        if PRACTICE.search(' '.join(w['word'] for w in before[-16:])):return
+        if any(w.get('start',0)<b and w.get('end',w.get('start',0))>a for w in transcript.get('warnings',[])):return
+        relevant=[{k:l.get(k) for k in ['vi','en','chunks']} for l in plan.get('lessons',[]) if l['start']<=b and l['end']>=a]
+        identity=hashlib.sha256(f'{VERSION}:{kind}:{a:.6f}:{b:.6f}'.encode()).hexdigest()[:14]
+        result.append({'id':'tighten-'+identity,'start':a,'end':b,'kind':kind,
+                       'before':before,'after':after,'targets':relevant})
+    for a,b in silences:
+        # Missing/coarse timestamps and overlapping speech are uncertainty, not permission.
+        if b-a<=3+1e-6 or any(w['start']<b-.08 and w['end']>a+.08 for w in words):continue
+        left=next((i for i in range(len(words)-1,-1,-1) if words[i]['end']<=a+.08),None)
+        right=next((i for i,w in enumerate(words) if w['start']>=b-.08),None)
+        if left is None or right is None or left in protected or right in protected:continue
+        keep=LEVELS[strength]
+        add(a+keep/2,b-keep/2,'silence',left,right)
     for i in range(len(words)):
-        if i<occupied or practice_at(words,words[i]['start']):continue
-        for j in range(i+6,min(len(words),i+70)):
-            if words[j]['start']-words[i]['end']>22:break
-            n=0
-            while i+n<j and j+n<len(words) and tokens[i+n] and tokens[i+n]==tokens[j+n]:n+=1
-            if n<6:continue
-            phrase=tokens[i:i+n]
-            if any(t and ' '.join(t) in ' '.join(phrase) for t in targets):continue
-            # Require a complete sentence or a clear restart marker after the first take.
-            following=' '.join(tokens[i+n:j])
-            complete=words[i+n-1]['word'].endswith(('.', '!', '?'))
-            if not complete and not re.search(r'\b(sorry|no|oops|xin lỗi)\b',following):continue
-            if practice_at(words,words[j]['start']):continue
-            begin=i
-            while begin>0 and i-begin<6 and words[i]['start']-words[begin-1]['start']<5 and not words[begin-1]['word'].endswith(('.', '!', '?')):
-                begin-=1
-            if practice_at(words,words[begin]['start']):continue
-            a=max(0,words[begin]['start']-.08);b=min(words[i+n-1]['end']+.08,words[j]['start']-.08)
-            add(a,b,'Bỏ lượt nói lại trùng câu; giữ lượt sau hoàn chỉnh')
-            occupied=i+n;break
-    result['cuts']=original+candidates
+        for n in range(1,4):
+            j=i+n
+            if j+n>len(words) or not all(tokens[i:j]) or tokens[i:j]!=tokens[j:j+n]:continue
+            # Keep whole sample repetitions; a false start before the complete target
+            # ("hôm hôm nay") may still be reviewed without removing that target.
+            if any(k in protected for k in range(i,j)):continue
+            if any(re.search(r'[.!?…。！？]$',w['word']) for w in words[i:j]):continue
+            if any(words[k+1]['start']-words[k]['end']>.4 for k in range(i,j+n-1)):continue
+            if words[j+n-1]['end']-words[i]['start']>4:continue
+            a=max(words[i-1]['end'] if i else 0,words[i]['start']-.04)
+            b=min(words[j-1]['end']+.04,words[j]['start'])
+            add(a,b,'stutter',j-1,j)
+    return result
+
+def propose(plan,transcript,duration,silences,strength='strong',approved=()):
+    if strength=='none':return restore_all_cuts(plan)
+    result=copy.deepcopy(plan)
+    original=[c for c in result.get('cuts',[]) if c.get('locked') or not automatic(c)]
+    cuts=original[:];approved=set(approved)
+    for candidate in candidates(plan,transcript,duration,silences,strength):
+        if candidate['id'] not in approved:continue
+        a,b=candidate['start'],candidate['end']
+        if any(a<c['end'] and b>c['start'] for c in cuts):continue
+        cut={k:candidate[k] for k in ['id','start','end']}
+        cut.update(reason='Rút ngập ngừng trên 3 giây trong phần giải thích' if candidate['kind']=='silence' else 'Bỏ từ lặp do nói vấp; giữ lượt nói sau',enabled=True,locked=False)
+        if sum(s['end']-s['start'] for s in keep_spans(duration,cuts+[cut]))>=min(.5,duration):cuts.append(cut)
+    result['cuts']=cuts
     validated=validate_plan(result,duration)
-    locked={c['id']:c for c in original if c.get('locked')}
-    result['cuts']=[copy.deepcopy(locked.get(c['id'],c)) for c in validated['cuts']]
+    preserved={c['id']:c for c in original}
+    result['cuts']=[copy.deepcopy(preserved.get(c['id'],c)) for c in validated['cuts']]
     return result
 
 def recut(project,context):
-    if project['options'].get('cut_strength')=='none':
+    strength=project['options'].get('cut_strength','strong')
+    if strength=='none':
         context.progress(4,'Giữ nguyên toàn bộ video · khôi phục mọi đoạn cắt')
         return restore_all_cuts(project['plan'])
-    context.progress(4,'Đo khoảng dừng và kiểm tra lượt nói lại')
+    from .cut_policy import review
+    context.progress(4,'Đo khoảng ngập ngừng trên 3 giây và kiểm tra từ nói vấp')
     intervals=quiet_intervals(context.folder/project['source_file'],context)
-    plan=propose(project['plan'],project.get('transcript') or {},project['metadata']['duration'],intervals,project['options'].get('cut_strength','strong'))
-    return plan
+    plan=project['plan'];transcript=project.get('transcript') or {};duration=project['metadata']['duration']
+    proposed=candidates(plan,transcript,duration,intervals,strength)
+    approved=review(proposed,context)
+    return propose(plan,transcript,duration,intervals,strength,approved)

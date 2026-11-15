@@ -158,7 +158,11 @@ Giao diện React/TypeScript; backend FastAPI; SQLite lưu tiến độ; FFmpeg 
 
 Sau khi tạo tự động, bản dựng được mở để xem và cắt tiếp trong cùng vùng màn hình. Mở danh sách bài học/phụ đề hoặc thuộc tính khi cần; đóng lại để có khung xem rộng. Kéo hoặc zoom timeline, tách tại đầu phát, chọn đoạn rồi bỏ; preview chuyển ngay đến phần còn lại. Lưu và Xuất nằm ngay trên khung xem.
 
-Cường độ cắt có Nhẹ / Vừa / Mạnh, mặc định Mạnh. Lưu trước rồi bấm Chạy lại cắt tự động để tính lại từ âm thanh và transcript đã có. Bước này chỉ đổi các điểm cắt, giữ nội dung bài học/ảnh/phụ đề; có thể khôi phục từng đoạn hoặc phục hồi phiên bản trước. Giữ các khoảng chờ đọc theo và lượt luyện nói được nhận diện; những lượt lặp không rõ nghĩa vẫn cần người dùng rà soát.
+Cường độ cắt có Không cắt / Nhẹ / Vừa / Mạnh, mặc định Mạnh. Cả ba mức đều chỉ rút **ngập ngừng trên 3 giây trong phần giải thích** và bỏ **lặp từ ngắn do nói vấp**. Nhẹ/Vừa/Mạnh khác nhau ở phần nghỉ ngắn còn giữ sau khi rút. Giữ nguyên khoảng nghỉ đọc mẫu, dịch nghĩa, luyện tập giữa Anh–Việt, Việt–Việt và Việt–Anh; không xoá lượt đọc lặp có chủ ý hoặc câu nói lại hoàn chỉnh.
+
+Lưu trước rồi bấm **Cắt lại** để đo âm thanh, dùng transcript đã có và nhờ Vilao xác nhận ngữ cảnh các ứng viên cắt. Kết quả kiểm tra được lưu để thử lại; chỗ chưa chắc được giữ. Nếu dịch vụ lỗi, các điểm cắt cũ vẫn còn. Bước này giữ nội dung bài học/ảnh/phụ đề và khoảng im lặng đã chèn, lưu phiên bản trước để khôi phục. Dự án cũ chỉ nhận quy tắc mới khi bấm **Cắt lại**; mở, lưu, xuất hoặc sửa bài học bằng AI không tự cắt lại.
+
+Danh sách dự án luôn xếp **ngày tạo mới nhất ở trên**, không đổi vị trí khi chỉnh sửa hay khôi phục. Nút **thùng rác cạnh từng dự án** yêu cầu xác nhận và chuyển dự án vào Thùng rác 7 ngày. Dự án đang xử lý phải đợi hoặc huỷ tác vụ trước. Bản nháp chưa lưu của dự án đang mở được giữ trong cửa sổ để khôi phục và lưu tiếp.
 
 ### Space và Chèn im lặng
 

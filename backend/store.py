@@ -74,9 +74,18 @@ def update(project_id, **changes):
 
 def listing(include_trashed=False):
     with connect() as conn:
-        rows = conn.execute('SELECT data FROM projects ORDER BY updated DESC').fetchall()
-    projects=[json.loads(row['data']) for row in rows]
+        rows = conn.execute('SELECT data FROM projects').fetchall()
+    projects=sorted([json.loads(row['data']) for row in rows],key=creation_key,reverse=True)
     return projects if include_trashed else [p for p in projects if p.get('_retention',{}).get('state','active')=='active']
+
+def creation_key(project):
+    # Undated legacy projects stay at the end; saving/restoring must never move them.
+    try:
+        created=datetime.fromisoformat(project['created_at'].replace('Z','+00:00'))
+        created=created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
+    except (KeyError,ValueError,AttributeError,TypeError):
+        created=datetime.min.replace(tzinfo=timezone.utc)
+    return created,project['id']
 
 def jobs(project_id=None):
     with connect() as conn:
