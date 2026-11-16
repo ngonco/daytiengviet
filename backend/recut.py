@@ -7,6 +7,9 @@ from .media import ffmpeg
 from .timeline import validate_plan,keep_spans
 
 VERSION=4
+EDGE_TRIM_VERSION=1
+EDGE_MIN=.5
+EDGE_KEEP=.2
 # All levels obey >3s; strength changes only the breathing space left behind.
 LEVELS={'light':.45,'medium':.35,'strong':.25}
 PRACTICE=re.compile(r'repeat|your turn|say it|say after|try it|practi[cs]e|listen and|read aloud|nhắc lại|đọc theo|lặp lại|luyện|đến lượt',re.I)
@@ -41,6 +44,52 @@ def restore_all_cuts(plan):
 
 def automatic(cut):
     return cut['id'].startswith('tighten-') or bool(re.fullmatch(r'cut-\d+-\d+',cut['id']))
+
+
+def trim_edge_plan(plan,duration,silences,strength='strong'):
+    """Measured source edges only; preserve interior pauses and explicit edits.
+
+    Boundary STT words can start at zero during silence. Use measured audio
+    with a 200ms margin rather than those coarse times or semantic review.
+    """
+    result=copy.deepcopy(plan)
+    if strength=='none':return result
+    cuts=[c for c in result.get('cuts',[]) if not c['id'].startswith('edge-trim-') or c.get('locked')]
+    for a,b in silences:
+        a=max(0,a);b=min(duration,b)
+        if b-a<EDGE_MIN-1e-6 or a<=1e-6 and b>=duration-.08:continue
+        if a<=1e-6:
+            start,end,side=0,b-EDGE_KEEP,'head'
+        elif b>=duration-.04:
+            start,end,side=a+EDGE_KEEP,duration,'tail'
+        else:continue
+        start=math.ceil(start*30-1e-6)/30;end=math.floor(end*30+1e-6)/30
+        if end<=start or any(c.get('locked') and not c.get('enabled',True) and start<c['end'] and end>c['start'] for c in cuts):continue
+        if any(c.get('enabled',True) and c['start']<=start and c['end']>=end for c in cuts):continue
+        identity=hashlib.sha256(f'{EDGE_TRIM_VERSION}:{side}:{start:.6f}:{end:.6f}'.encode()).hexdigest()[:14]
+        cut={'id':'edge-trim-'+identity,'start':start,'end':end,'enabled':True,'locked':False,
+             'reason':'Cắt im lặng '+('đầu' if side=='head' else 'cuối')+' video · chừa 0,2 giây sát lời nói'}
+        if sum(s['end']-s['start'] for s in keep_spans(duration,cuts+[cut]))>=min(.5,duration):cuts.append(cut)
+    result['cuts']=sorted(cuts,key=lambda c:c['start'])
+    validate_plan(result,duration)
+    return result
+
+
+def edge_report(project,context,intervals,result):
+    from .store import atomic_json
+    path=context.folder/'analysis'/'edge-trim'/f"v{project.get('revision',0):05}-policy{EDGE_TRIM_VERSION}.json"
+    path.parent.mkdir(parents=True,exist_ok=True)
+    atomic_json(path,{'version':EDGE_TRIM_VERSION,'minimum':EDGE_MIN,'keep':EDGE_KEEP,
+                     'measured_quiet':intervals,'edge_cuts':[c for c in result.get('cuts',[]) if c['id'].startswith('edge-trim-')]})
+
+
+def trim_edges(project,context):
+    if project['options'].get('cut_strength','strong')=='none':return copy.deepcopy(project['plan'])
+    context.progress(4,'Đo im lặng đầu/cuối · từ 0,5 giây, chừa 0,2 giây')
+    intervals=quiet_intervals(context.folder/project['source_file'],context)
+    result=trim_edge_plan(project['plan'],project['metadata']['duration'],intervals)
+    context.check();edge_report(project,context,intervals,result)
+    return result
 
 def candidates(plan,transcript,duration,silences,strength='strong'):
     """Only propose measured gaps and immediate short duplicates, never whole retakes."""
@@ -97,7 +146,7 @@ def candidates(plan,transcript,duration,silences,strength='strong'):
 
 def propose(plan,transcript,duration,silences,strength='strong',approved=()):
     if strength=='none':return restore_all_cuts(plan)
-    result=copy.deepcopy(plan)
+    result=trim_edge_plan(plan,duration,silences,strength)
     original=[c for c in result.get('cuts',[]) if c.get('locked') or not automatic(c)]
     cuts=original[:];approved=set(approved)
     for candidate in candidates(plan,transcript,duration,silences,strength):
@@ -124,4 +173,6 @@ def recut(project,context):
     plan=project['plan'];transcript=project.get('transcript') or {};duration=project['metadata']['duration']
     proposed=candidates(plan,transcript,duration,intervals,strength)
     approved=review(proposed,context)
-    return propose(plan,transcript,duration,intervals,strength,approved)
+    result=propose(plan,transcript,duration,intervals,strength,approved)
+    context.check();edge_report(project,context,intervals,result)
+    return result

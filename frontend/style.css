@@ -80,3 +80,10 @@
 .project-row .project-link>span:not(.tiny-pulse){min-width:0;overflow:hidden}
 .project-delete{flex:none;width:30px;height:32px;color:var(--muted)}
 .project-delete:hover:not(:disabled),.project-delete:focus-visible{color:#e29883;background:#743c2a33}
+.saved-photo-overlay{position:absolute;inset:0;pointer-events:none}
+.photo-hotspot{position:absolute;display:flex;align-items:flex-start;justify-content:flex-end;padding:8px;background:transparent;border:2px solid transparent;border-radius:10px;pointer-events:auto;cursor:pointer}
+.photo-hotspot span{padding:6px 9px;border-radius:6px;background:#163247dd;color:white;font-size:11px;opacity:0;transition:opacity .15s}
+.photo-hotspot:hover:not(:disabled),.photo-hotspot:focus-visible{border-color:#c7ed9a}
+.photo-hotspot:hover span,.photo-hotspot:focus-visible span{opacity:1}
+.photo-hotspot:disabled{pointer-events:none}
+@media(hover:none){.photo-hotspot span{opacity:1}}

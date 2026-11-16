@@ -34,6 +34,54 @@ function setup({pauses=[],cuts=[],cursor=2,current=2}={}){
 const timeline=tree=>tree.find(n=>typeof n.props.onCutOutput==='function').props;
 const live=tree=>tree.find(n=>n.props.controllerRef&&n.props.onOutputTime)?.props;
 
+const settle=()=>new Promise(resolve=>setImmediate(resolve));
+const photoButton=tree=>tree.find(n=>n.type?.name==='SavedPhotoHotspot')?.props;
+test('clicking the saved preview photo pauses playback, searches the visible lesson and autosaves its replacement only',async t=>{
+ const m=setup({current:3.9,cursor:3.9});m.state.playing=true;
+ const first={...m.state.draft.lessons[0],end:4,asset_id:'old-first'},second={...first,id:'second',start:4,end:8,vi:'Quả cam',en:'Orange',photo_query:'orange fruit',asset_id:'old-second',photo_crops:{'16:9':{zoom:2,x:1,y:0}}};
+ m.state.draft.lessons=[first,second];m.state.project={...m.state.project,plan:structuredClone(m.state.draft)};m.state.selected=first.id;
+ const requests=[];t.mock.method(globalThis,'setTimeout',()=>0);t.mock.method(globalThis,'clearTimeout',()=>{});
+ t.mock.method(globalThis,'fetch',async(url,init)=>{
+  requests.push({url,init});
+  if(url.startsWith('/api/photos/search'))return {ok:true,json:async()=>[{id:'42',preview:'orange.jpg',alt:'Orange',photographer:'Test'}]};
+  if(url.endsWith('/photos'))return {ok:true,json:async()=>({id:'new-image',file:'orange.jpg',provider:'pexels'})};
+  const body=JSON.parse(init.body);return {ok:true,json:async()=>({...m.state.project,revision:2,plan:body.plan,options:body.options,jobs:[]})};
+ });
+ let paused=0,tree=m.render();tree.find(n=>n.type==='video').props.ref({currentTime:5,pause(){paused++}});
+ photoButton(tree).onClick();await settle();tree=m.render();
+ assert.equal(paused,1);assert.equal(m.state.playing,false);assert.equal(m.state.photoSearch,true);assert.equal(m.state.photoTarget.id,'second');assert.equal(m.state.query,'orange fruit');assert.equal(m.state.current,5);
+ assert.equal(requests[0].url,'/api/photos/search?query=orange%20fruit');
+ await tree.find(n=>n.type==='button'&&n.props.onClick?.toString().includes('pickPhoto')).props.onClick();tree=m.render();
+ assert.equal(m.state.photoSearch,false);assert.equal(m.state.dirty,true);assert.equal(m.state.draft.lessons[0].asset_id,'old-first');
+ assert.equal(m.state.draft.lessons[1].asset_id,'new-image');assert.equal(m.state.draft.lessons[1].locked,true);assert.deepEqual(m.state.draft.lessons[1].photo_crops,{});
+ assert.equal(m.state.project.assets['new-image'].file,'orange.jpg');
+ await m.autoTimer().tick();assert.equal(m.state.dirty,false);
+ const saved=JSON.parse(requests.at(-1).init.body);assert.equal(saved.plan.lessons[1].asset_id,'new-image');assert.equal(saved.render_preview,false);
+});
+
+test('live preview image opens search and obsolete results or errors cannot replace a newer keyword search',async t=>{
+ const m=setup();m.state.previewDraft=true;const pending=[];
+ t.mock.method(globalThis,'fetch',(url,init)=>new Promise(resolve=>pending.push({url,init,resolve})));
+ live(m.render()).onPhotoSearch('l');let tree=m.render();assert.equal(m.state.photoSearch,true);assert.equal(pending.length,1);
+ tree.find(n=>n.type==='input'&&n.props['aria-label']==='Từ khóa Pexels').props.onChange({target:{value:'better image'}});
+ tree=m.render();tree.find(n=>n.type==='form'&&n.props.className==='search-form').props.onSubmit({preventDefault(){}});
+ assert.equal(pending[0].init.signal.aborted,true);assert.equal(pending.length,2);
+ pending[1].resolve({ok:true,json:async()=>[{id:'new',preview:'new.jpg'}]});await settle();
+ pending[0].resolve({ok:false,status:500,json:async()=>({detail:'Old search failed'})});await settle();
+ assert.equal(m.state.photos[0].id,'new');assert.equal(m.state.photoError,'');assert.equal(m.state.photoResultQuery,'better image');
+ tree=m.render();tree.find(n=>n.props['aria-label']==='Đóng tìm ảnh').props.onClick();assert.equal(m.state.photoSearch,false);assert.equal(m.state.dirty,false);
+});
+
+test('a late photo download cannot modify a different project',async t=>{
+ const m=setup();let complete;t.mock.method(globalThis,'setTimeout',()=>0);t.mock.method(globalThis,'clearTimeout',()=>{});
+ t.mock.method(globalThis,'fetch',async(url)=>url.startsWith('/api/photos/search')?{ok:true,json:async()=>[{id:'42',preview:'image.jpg'}]}:new Promise(resolve=>complete=resolve));
+ photoButton(m.render()).onClick();await settle();let tree=m.render();
+ const picking=tree.find(n=>n.type==='button'&&n.props.onClick?.toString().includes('pickPhoto')).props.onClick();
+ m.state.project={...m.state.project,id:'another'};m.render();const draft=m.state.draft;
+ complete({ok:true,json:async()=>({id:'late',file:'late.jpg'})});await picking;
+ assert.equal(m.state.draft,draft);assert.equal(m.state.project.assets.late,undefined);assert.equal(m.state.dirty,false);
+});
+
 test('background sidebar polling reveals finished projects on every screen without touching the open draft or playback',async t=>{
  let tick,respond; t.mock.method(globalThis,'setTimeout',fn=>{tick=fn;return 1});t.mock.method(globalThis,'clearTimeout',()=>{});
  t.mock.method(globalThis,'fetch',(url,init)=>{assert.equal(url,'/api/projects');assert.ok(init.signal);return new Promise(resolve=>respond=resolve)});

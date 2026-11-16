@@ -5,12 +5,13 @@ import {PreviewRequests} from './preview_requests';
 import {configurePreviewAudio,resumePreviewAudio,releasePreviewAudio} from './audio_volume';
 import {keepSpans,sourceTime} from './output_timeline';
 import {defaultFrame,type VideoFrame} from './editing';
-type Scene={sequence:number;width:number;height:number;geometry:{speaker:number[];radius:number;speaker_radius?:number;circle?:boolean};speaker_transform:{left:number;top:number;width:number;height:number};page:string;subtitle:string|null;subtitle_rect:number[]|null;source:{file:string;state:string;message?:string}};
-type Props={controllerRef:React.RefObject<PlaybackController|null>;seekRequest:{time:number;seq:number}|null;onOutputTime:(t:number)=>void;initialOutput:number;project:any;plan:any;options:any;videoRef:React.RefObject<HTMLVideoElement|null>;busy:boolean;dirty:boolean;onTime:(time:number)=>void;onPlay:(playing:boolean)=>void;onPrepare:()=>void;onSizeChange:(size:number)=>void;onLayoutChange:(key:'portrait_layout'|'landscape_layout',layout:'classic'|'circle')=>void;onFrameChange:(key:string,frame:VideoFrame)=>void};
+import {PhotoHotspot} from './PhotoHotspot';
+type Scene={sequence:number;width:number;height:number;geometry:{photo:number[];speaker:number[];radius:number;speaker_radius?:number;circle?:boolean};speaker_transform:{left:number;top:number;width:number;height:number};page:string;subtitle:string|null;subtitle_rect:number[]|null;source:{file:string;state:string;message?:string}};
+type Props={onPhotoSearch:(lessonId:string)=>void;controllerRef:React.RefObject<PlaybackController|null>;seekRequest:{time:number;seq:number}|null;onOutputTime:(t:number)=>void;initialOutput:number;project:any;plan:any;options:any;videoRef:React.RefObject<HTMLVideoElement|null>;busy:boolean;dirty:boolean;onTime:(time:number)=>void;onPlay:(playing:boolean)=>void;onPrepare:()=>void;onSizeChange:(size:number)=>void;onLayoutChange:(key:'portrait_layout'|'landscape_layout',layout:'classic'|'circle')=>void;onFrameChange:(key:string,frame:VideoFrame)=>void};
 const media=(id:string,path:string)=>`/api/projects/${id}/media/${path.split('/').map(encodeURIComponent).join('/')}`;
 const at=(items:any[],time:number)=>items.find(i=>i.start<=time&&i.end>time);
 
-export default function LivePreview({controllerRef,seekRequest,onOutputTime,initialOutput,project,plan,options,videoRef,busy,dirty,onTime,onPlay,onPrepare,onFrameChange,onSizeChange,onLayoutChange}:Props){
+export default function LivePreview({onPhotoSearch,controllerRef,seekRequest,onOutputTime,initialOutput,project,plan,options,videoRef,busy,dirty,onTime,onPlay,onPrepare,onFrameChange,onSizeChange,onLayoutChange}:Props){
  const initialSpans=keepSpans(project.metadata.duration,plan.cuts,plan.pauses||[]);
  const initialSource=sourceTime(initialOutput,initialSpans);
  const stageRef=useRef<HTMLDivElement>(null);
@@ -64,6 +65,7 @@ export default function LivePreview({controllerRef,seekRequest,onOutputTime,init
   <div className="live-stage" ref={stageRef}>
    {scene&&g&&s&&tr?<div className="live-surface" style={{width:fitted.width,height:fitted.height,visibility:fitted.width?'visible':'hidden'}}>
     <img className="live-page" src={scene.page} alt="Khung bài học đang chỉnh sửa"/>
+    {lesson&&<PhotoHotspot disabled={busy} onClick={()=>onPhotoSearch(lesson.id)} style={{left:`${g.photo[0]/scene.width*100}%`,top:`${g.photo[1]/scene.height*100}%`,width:`${g.photo[2]/scene.width*100}%`,height:`${g.photo[3]/scene.height*100}%`}}/>}
     <div className="live-speaker draggable-video" title="Kéo để chỉnh vị trí video trong khung" onPointerDown={e=>{if(busy)return;e.currentTarget.setPointerCapture(e.pointerId);const r=e.currentTarget.getBoundingClientRect();drag.current={px:e.clientX,py:e.clientY,width:r.width,height:r.height,frame:{...frame}}}} onPointerMove={e=>{const d=drag.current;if(!d||busy)return;changeFrame({zoom:d.frame.zoom,x:Math.max(-1,Math.min(1,d.frame.x+(e.clientX-d.px)/d.width)),y:Math.max(-1,Math.min(1,d.frame.y+(e.clientY-d.py)/d.height))})}} onPointerUp={()=>{drag.current=null}} onPointerCancel={()=>{drag.current=null}} style={{left:`${s[0]/scene.width*100}%`,top:`${s[1]/scene.height*100}%`,width:`${s[2]/scene.width*100}%`,height:`${s[3]/scene.height*100}%`,borderRadius:`${(g.speaker_radius??g.radius)/s[2]*100}% / ${(g.speaker_radius??g.radius)/s[3]*100}%`,background: '#F7F3EB'}}>
      <video ref={videoRef} playsInline preload="auto" src={media(project.id,scene.source.file)} style={{left:`${tr.left/s[2]*100}%`,top:`${tr.top/s[3]*100}%`,width:`${tr.width/s[2]*100}%`,height:`${tr.height/s[3]*100}%`}} onLoadedMetadata={e=>{e.currentTarget.currentTime=Math.min(timeRef.current,project.metadata.duration)}} />
     </div>

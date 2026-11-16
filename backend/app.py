@@ -230,7 +230,7 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':5,'project_titles_version':1}
+    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':5,'project_titles_version':1,'photo_edges_version':1}
 
 @app.get('/api/projects/{project_id}/waveform')
 def editor_waveform(project_id:str):
@@ -319,6 +319,14 @@ def delete_project(project_id:str):
         project=store.read(project_id,True)
     return {'id':project_id,'trashed':True,'purge_after':project['_retention']['purge_after']}
 
+@app.get('/api/projects/{project_id}/frame-geometry')
+def frame_geometry(project_id:str):
+    from .render import dimensions
+    from .templates import geometry
+    project=store.read(project_id)
+    width,height=dimensions(project,True)
+    return {'width':width,'height':height,'geometry':geometry(width,height,project['options'])}
+
 @app.get('/api/projects/{project_id}/audio-level')
 def audio_level(project_id:str):
     from .audio import preview_level
@@ -326,7 +334,7 @@ def audio_level(project_id:str):
     return preview_level(store.folder(project_id)/project['source_file'])
 
 @app.post('/api/projects/{project_id}/jobs/{kind}')
-def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker','recut']):
+def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker','recut','trim_edges']):
     idle(project_id)
     project=store.read(project_id)
     if kind!='pipeline' and not project.get('plan'):

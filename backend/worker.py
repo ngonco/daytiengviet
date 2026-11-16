@@ -65,6 +65,14 @@ def execute(job):
         from .matting import ensure_matting
         result=ensure_matting(project,context)
         store.update(project['id'],matting=result,status='ready')
+    elif job['kind']=='trim_edges':
+        from .recut import trim_edges
+        plan=trim_edges(project,context)
+        context.check()
+        if plan!=project['plan']:
+            version(project)
+            store.update(project['id'],plan=plan,revision=project['revision']+1,status='ready')
+        else:store.update(project['id'],status='ready')
     elif job['kind']=='lesson_photos':
         from .photo_pools import prepare_pool,apply_pool
         import copy
