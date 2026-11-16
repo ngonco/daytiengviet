@@ -61,6 +61,11 @@ def read(project_id,include_trashed=False):
     return project
 
 def save(project):
+    from .seo import repaired_title
+    repaired = repaired_title(project)
+    if repaired is not None:
+        project['title'] = repaired
+        project['title_mode'] = 'auto'
     project['updated_at'] = now()
     with LOCK, connect() as conn:
         conn.execute('INSERT INTO projects VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated=excluded.updated', (project['id'], json.dumps(project, ensure_ascii=False), project['updated_at']))
@@ -71,6 +76,26 @@ def update(project_id, **changes):
         project.update(changes)
         save(project)
         return project
+
+def repair_project_titles():
+    """Title-only migration; preserve timestamps, revisions, media and Trash."""
+    from .seo import repaired_title
+    count = 0
+    with LOCK, connect() as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        busy = {row['project_id'] for row in conn.execute("SELECT project_id FROM jobs WHERE status IN ('queued','running','cancelling')")}
+        for row in conn.execute('SELECT id,data FROM projects').fetchall():
+            project = json.loads(row['data'])
+            if project.get('diagnostic') or project['id'] in busy or project.get('_retention', {}).get('state', 'active') != 'active':
+                continue
+            repaired = repaired_title(project)
+            if repaired is None:
+                continue
+            project.update(title=repaired, title_mode='auto')
+            conn.execute('UPDATE projects SET data=? WHERE id=?', (json.dumps(project, ensure_ascii=False), row['id']))
+            count += 1
+    return count
+
 
 def listing(include_trashed=False):
     with connect() as conn:

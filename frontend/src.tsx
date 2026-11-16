@@ -20,6 +20,7 @@ import {Trash2} from 'lucide-react';
 import ThumbnailEditor from './ThumbnailEditor';
 import MattingPanel, {backgroundDefault, type BackgroundRemoval} from './MattingPanel';
 import AutomationPanel from './AutomationPanel';
+import {watchProjectList} from './project_list_polling';
 
 type Options = {ratio:string;style:string;density:number;subtitles:string;language:string;sfx:boolean;auto_volume:boolean;zoom:boolean;fit:string;focus_x:number;layout_mode:string;speaker_x:number|null;speaker_y:number|null;speaker_scale:number;landscape_layout?:'classic'|'circle';portrait_layout?:'classic'|'circle';speaker_size?:number;cut_strength?:'none'|'light'|'medium'|'strong';video_frames?:Record<string,VideoFrame>;background_removal:BackgroundRemoval};
 type Caption = {id:string;start:number;end:number;vi:string;en:string;original_vi?:string;locked:boolean};
@@ -64,7 +65,7 @@ function App(){
  const [screen,setScreen]=useState<'studio'|'settings'|'trash'|'automation'>('studio'),[wizard,setWizard]=useState(false);
  const [toast,setToast]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState('');
  const [runtimeWarning,setRuntimeWarning]=useState('');
- useEffect(()=>{let disposed=false;api('/health').then(result=>{if(!disposed)setRuntimeWarning(result.version==='1.5.3'&&result.provider_retry_version===1&&result.assembly_editor_version===5?'':'Máy chủ chưa nạp trình chỉnh sửa bản dựng mới. Hãy dừng và mở lại máy chủ VietCut, rồi tải lại trang. Đóng tab trình duyệt riêng chưa dừng máy chủ.')}).catch(()=>{if(!disposed)setRuntimeWarning('Chưa kiểm tra được máy chủ. Hãy kiểm tra VietCut đang chạy rồi tải lại trang.')});return()=>{disposed=true}},[]);
+ useEffect(()=>{let disposed=false;api('/health').then(result=>{if(!disposed)setRuntimeWarning(result.version==='1.5.3'&&result.provider_retry_version===1&&result.assembly_editor_version===5&&result.project_titles_version===1?'':'Máy chủ chưa nạp bản cập nhật VietCut mới. Hãy dừng và mở lại máy chủ VietCut, rồi tải lại trang. Đóng tab trình duyệt riêng chưa dừng máy chủ.')}).catch(()=>{if(!disposed)setRuntimeWarning('Chưa kiểm tra được máy chủ. Hãy kiểm tra VietCut đang chạy rồi tải lại trang.')});return()=>{disposed=true}},[]);
  const [tab,setTab]=useState<'captions'|'visuals'|'cuts'|'lessons'>('captions'),[selected,setSelected]=useState('');
  const [previewDraft,setPreviewDraft]=useState(false);
  const [mode,setMode]=useState<'source'|'preview'>('preview'),[current,setCurrent]=useState(0),[playing,setPlaying]=useState(false);
@@ -82,7 +83,9 @@ function App(){
  function markDirty(){editVersion.current++;dirtyRef.current=true;setDirty(true)}
  function notify(text:string){setToast(text);setTimeout(()=>setToast(''),4500)}
  async function action(name:string,fn:()=>Promise<void>){setPending(name);setError('');try{await fn()}catch(e){setError((e as Error).message)}finally{setPending('')}}
- async function list(){setProjects(await api('/projects'))}
+ const listSequence=useRef(0);
+ async function list(signal?:AbortSignal){const sequence=++listSequence.current;const items=await api<Project[]>('/projects',{signal});if(!signal?.aborted&&sequence===listSequence.current)setProjects(items)}
+ useEffect(()=>watchProjectList(list),[]);
  async function open(id:string,force=false,navigate=true){if(projectRef.current?.id!==id||force){saveSession.current++;saveBlocked.current=false;setLastSaved('');setSaveError('');video.current?.pause();setCurrent(0);setPlaying(false);cutHistory.reset();setPreviewDraft(false);setAssemblyCursor(null);setSeekRequest(null);setThumbnailOpen(false);pendingSourceSeek.current=null;setSourceSeek(null)}const p=await api<Project>(`/projects/${id}`);setProject(p);if(force||!dirtyRef.current){draftRevision.current=p.revision;setDraft(p.plan?structuredClone({...p.plan,schema_version:p.plan.schema_version||1,lessons:p.plan.lessons||[]}):null);setOptions({...p.options,background_removal:p.options.background_removal||backgroundDefault});setDirty(false);if(force)setTab(p.options.layout_mode==='lesson'?'lessons':'captions')}if(navigate)setScreen('studio');localStorage.setItem('vietcut-project',id);return p;}
  useEffect(()=>{list().catch(e=>setError(e.message));const id=localStorage.getItem('vietcut-project');if(id)open(id,true).catch(()=>localStorage.removeItem('vietcut-project'));},[]);
  useEffect(()=>{if(!project?.id||project.trashed)return;const id=project.id;const events=new EventSource(`/api/projects/${id}/events`);events.onmessage=(event)=>{const data=JSON.parse(event.data);if(data.trashed){events.close();setProject(p=>p?.id===id?{...p,trashed:true}:p);list().catch(()=>{});return}const old=projectRef.current;if(!old||old.id!==id)return;const saving=saveFlight.current;if(saving?.projectId===id&&saving.session===saveSession.current&&data.revision===saving.revision+1){setProject(p=>p?.id===id?{...p,jobs:data.jobs,status:data.status,preview:data.preview,export:data.export}:p);return}const refresh=data.revision!==old.revision||data.status!==old.status||data.preview?.digest!==old.preview?.digest||JSON.stringify(data.jobs.map((j:Job)=>[j.id,j.status]))!==JSON.stringify(old.jobs.map(j=>[j.id,j.status]));setProject(p=>p?.id===id?{...p,...data}:p);if(refresh){open(id,false,false).catch(e=>setError(e.message));list().catch(()=>{})}};return()=>events.close()},[project?.id,project?.trashed]);

@@ -94,6 +94,7 @@ class PhotoPoolBody(BaseModel):
 @asynccontextmanager
 async def lifespan(app):
     store.init()
+    store.repair_project_titles()
     from . import retention
     await asyncio.to_thread(retention.sweep)
     worker.start()
@@ -229,7 +230,7 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':5}
+    return {'ok':True,'app':'vietcut','version':app.version,'provider_retry_version':PROVIDER_RETRY_VERSION,'assembly_editor_version':5,'project_titles_version':1}
 
 @app.get('/api/projects/{project_id}/waveform')
 def editor_waveform(project_id:str):

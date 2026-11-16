@@ -29,10 +29,30 @@ function setup({pauses=[],cuts=[],cursor=2,current=2}={}){
  const project={id:'synthetic',title:'Test',source_file:'source.mp4',metadata:{duration:8,width:320,height:180},revision:1,options,plan,assets:{},jobs:[],status:'ready',warnings:[],time_map:keepSpans(8,cuts,pauses),preview:null,export:{file:'export.mp4',duration:8+pauses.reduce((n,p)=>n+p.duration,0),width:320,height:180,revision:1,digest:'saved'}};
  const state={project,projects:[project],draft:structuredClone(plan),options,assemblyCursor:cursor,current};
  const hooks={effect(fn,deps){effects.push({fn,deps})},namedState(name,v){if(!(name in state))state[name]=typeof v==='function'?v():v;return [state[name],next=>state[name]=typeof next==='function'?next(state[name]):next]},state(v){return hooks.namedState('generic-'+index++,v)},ref(v){const at=index++;return values[at]??(values[at]={current:v})}};
- return {state,eventListener(){const effect=effects.find(e=>e.fn.toString().includes('new EventSource'));assert.ok(effect);let source;const original=globalThis.EventSource;globalThis.EventSource=class{constructor(){source=this}close(){}};try{effect.fn()}finally{if(original===undefined)delete globalThis.EventSource;else globalThis.EventSource=original}return source.onmessage},render(){index=0;effects=[];globalThis.__appHooks=hooks;const tree=nodes(App());for(const {fn} of effects)if(/(?:projectRef\.current\s*=\s*project|dirtyRef\.current\s*=\s*dirty)/.test(fn.toString()))fn();return tree},autoTimer(){const effect=effects.find(e=>e.fn.toString().includes('setInterval'));assert.ok(effect);const previous=globalThis.setInterval;let tick,delay;globalThis.setInterval=(fn,ms)=>{tick=fn;delay=ms;return {}};try{effect.fn()}finally{globalThis.setInterval=previous}return {tick,delay}}};
+ return {state,effect(pattern){return effects.find(({fn})=>pattern.test(fn.toString())).fn},eventListener(){const effect=effects.find(e=>e.fn.toString().includes('new EventSource'));assert.ok(effect);let source;const original=globalThis.EventSource;globalThis.EventSource=class{constructor(){source=this}close(){}};try{effect.fn()}finally{if(original===undefined)delete globalThis.EventSource;else globalThis.EventSource=original}return source.onmessage},render(){index=0;effects=[];globalThis.__appHooks=hooks;const tree=nodes(App());for(const {fn} of effects)if(/(?:projectRef\.current\s*=\s*project|dirtyRef\.current\s*=\s*dirty)/.test(fn.toString()))fn();return tree},autoTimer(){const effect=effects.find(e=>e.fn.toString().includes('setInterval'));assert.ok(effect);const previous=globalThis.setInterval;let tick,delay;globalThis.setInterval=(fn,ms)=>{tick=fn;delay=ms;return {}};try{effect.fn()}finally{globalThis.setInterval=previous}return {tick,delay}}};
 }
 const timeline=tree=>tree.find(n=>typeof n.props.onCutOutput==='function').props;
 const live=tree=>tree.find(n=>n.props.controllerRef&&n.props.onOutputTime)?.props;
+
+test('background sidebar polling reveals finished projects on every screen without touching the open draft or playback',async t=>{
+ let tick,respond; t.mock.method(globalThis,'setTimeout',fn=>{tick=fn;return 1});t.mock.method(globalThis,'clearTimeout',()=>{});
+ t.mock.method(globalThis,'fetch',(url,init)=>{assert.equal(url,'/api/projects');assert.ok(init.signal);return new Promise(resolve=>respond=resolve)});
+ for(const screen of ['automation','studio','settings','trash']){
+  const m=setup();m.state.screen=screen;m.state.dirty=true;m.state.playing=true;m.render();
+  const before={...m.state};const stop=m.effect(/watchProjectList/)();const pending=tick();
+  const items=[{id:'completed',title:'Một quả cam',status:'ready'},...m.state.projects];
+  respond({ok:true,json:async()=>items});await pending;assert.equal(m.state.projects,items);
+  for(const key of Object.keys(before).filter(k=>k!=='projects'))assert.equal(m.state[key],before[key],key);
+  stop();
+ }
+});
+
+test('unmounting sidebar polling ignores even a late response that bypasses abort',async t=>{
+ let tick,respond;t.mock.method(globalThis,'setTimeout',fn=>{tick=fn;return 1});t.mock.method(globalThis,'clearTimeout',()=>{});
+ t.mock.method(globalThis,'fetch',()=>new Promise(resolve=>respond=resolve));
+ const m=setup();m.render();const original=m.state.projects,stop=m.effect(/watchProjectList/)(),pending=tick();
+ stop();respond({ok:true,json:async()=>[{id:'late'}]});await pending;assert.equal(m.state.projects,original);
+});
 test('cut from saved MP4 switches to live at the new join and undo/redo restores matching timeline state',()=>{
  const m=setup();assert.equal(live(m.render()),undefined);
  assert.equal(timeline(m.render()).onCutOutput(1,3),true);let tree=m.render();assert.equal(m.state.dirty,true);assert.equal(live(tree).initialOutput,1);assert.equal(m.state.current,3);assert.equal(m.state.sourceSeek,null);assert.equal(m.state.seekRequest.time,1);
