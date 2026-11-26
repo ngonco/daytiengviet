@@ -161,8 +161,7 @@ def execute(job):
         cfg=automation.config()
         publish_hour=cfg.get('youtube_publish_hour','19:00')
         scheduled_date=youtube.next_available_slot(request.get('start_date'))
-        video_title=f'Vietnamese Learn | Bài học: {seo.title(project)}'
-        video_desc=f'Vietnamese learn — Bài học tiếng Việt: {seo.title(project)}. Learn Vietnamese with Vietnamese with Vinh.'
+        video_title,video_desc=youtube.build_youtube_metadata(project)
         uploaded=youtube.upload_and_schedule(export_path,video_title,video_desc,scheduled_date,publish_hour,context,start_date=request.get('start_date'))
         final_date=uploaded.get('scheduled_date') or scheduled_date
         record=youtube.record_upload(project['id'],source_hash,export_hash,final_date,publish_hour,video_title,'scheduled',uploaded.get('video_url',''))

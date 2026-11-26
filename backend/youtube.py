@@ -42,6 +42,59 @@ def parse_studio_dates(texts):
     return found
 
 
+def build_youtube_metadata(project):
+    """Build YouTube title ('Learn vietnamese: <lesson> #learnvietnamese') and lesson description."""
+    from .seo import title as seo_title
+    plan = project.get('plan') or {}
+    lessons = plan.get('lessons') or []
+    opts = project.get('options') or {}
+    meta = project.get('metadata') or {}
+    is_short = opts.get('ratio') == '9:16' or (opts.get('ratio') == 'original' and meta.get('height', 0) > meta.get('width', 0))
+    prefix = 'Learn vietnamese: '
+    tags = '#learnvietnamese #shorts' if is_short else '#learnvietnamese'
+    budget = 100 - len(prefix) - len(tags) - 1
+    en_targets = []
+    for item in lessons:
+        val = re.sub(r'\s+', ' ', str(item.get('en') or '')).strip()
+        if val and val not in en_targets:
+            en_targets.append(val)
+    if en_targets:
+        chosen = en_targets[0]
+        for nxt in en_targets[1:]:
+            if len(chosen) + 3 + len(nxt) <= budget:
+                chosen = f'{chosen} · {nxt}'
+            else:
+                break
+    else:
+        chosen = seo_title(project)
+    if len(chosen) > budget:
+        words = chosen[:budget].rsplit(' ', 1)[0].strip()
+        chosen = words or chosen[:budget].strip()
+    video_title = f'{prefix}{chosen} {tags}'[:100]
+
+    lines = []
+    summary = re.sub(r'\s+', ' ', str(plan.get('summary') or '')).strip()
+    if summary:
+        lines.append(f'Topic: {summary}')
+        lines.append('')
+    for item in lessons:
+        vi = re.sub(r'\s+', ' ', str(item.get('vi') or '')).strip()
+        en = re.sub(r'\s+', ' ', str(item.get('en') or '')).strip()
+        if vi or en:
+            lines.append(f'- {vi} — {en}' if vi and en else f'- {vi or en}')
+        for ch in item.get('chunks') or []:
+            cvi = re.sub(r'\s+', ' ', str(ch.get('vi') or '')).strip()
+            cen = re.sub(r'\s+', ' ', str(ch.get('en') or '')).strip()
+            if cvi or cen:
+                lines.append(f'  • {cvi}: {cen}')
+    if not lines:
+        lines.append(seo_title(project))
+    lines.append('')
+    desc_tags = '#learnvietnamese #vietnamese #hoctiengviet' + (' #shorts' if is_short else '')
+    lines.append(desc_tags)
+    return video_title, '\n'.join(lines)[:5000]
+
+
 def profile_dir():
     path = store.data_root().resolve() / 'runtime' / 'youtube-profile'
     path.mkdir(parents=True, exist_ok=True)

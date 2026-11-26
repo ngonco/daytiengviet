@@ -110,6 +110,26 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         slot = youtube.next_available_slot(today=date(2026, 11, 26), extra_taken=parsed)
         self.assertEqual(slot, '2026-11-29')
 
+    def test_youtube_metadata_formula_title_and_lesson_description(self):
+        p = {
+            'title': 'Gọi nước',
+            'options': {'ratio': '9:16'},
+            'metadata': {'width': 1080, 'height': 1920},
+            'plan': {
+                'summary': 'Ordering drinks',
+                'lessons': [{
+                    'vi': 'Cho tôi nước lọc',
+                    'en': 'I would like water',
+                    'chunks': [{'vi': 'Cho tôi', 'en': 'I would like'}, {'vi': 'nước lọc', 'en': 'water'}],
+                }],
+            },
+        }
+        title, desc = youtube.build_youtube_metadata(p)
+        self.assertEqual(title, 'Learn vietnamese: I would like water #learnvietnamese #shorts')
+        self.assertIn('Cho tôi nước lọc — I would like water', desc)
+        self.assertIn('Cho tôi: I would like', desc)
+        self.assertIn('#learnvietnamese', desc)
+
 
 if __name__ == '__main__':
     unittest.main()
