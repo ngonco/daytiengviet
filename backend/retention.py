@@ -48,6 +48,47 @@ def _rollback_unmoved(project):
         project.pop('_retention',None);store.save(project)
 
 
+def _safe_rmtree(path):
+    if not path.exists():return
+    for directory,dirs,files in os.walk(path,followlinks=False):
+        for name in dirs+files:
+            node=Path(directory)/name;attributes=node.lstat()
+            if node.is_symlink() or getattr(attributes,'st_file_attributes',0)&getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',1024):
+                raise ValueError('Thư mục có liên kết; chưa xóa để bảo vệ tệp ngoài dự án.')
+    shutil.rmtree(path)
+
+
+def _delete_external_source(project_id):
+    from .automation import items
+    root=store.data_root().resolve()
+    for row in items():
+        if row.get('project_id')!=project_id or not row.get('source'):continue
+        src=Path(row['source'])
+        try:
+            if not src.exists() and not src.is_symlink():continue
+            info=src.lstat()
+            if src.is_symlink() or getattr(info,'st_file_attributes',0)&getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',1024):continue
+            resolved=src.resolve()
+            if resolved==root or root in resolved.parents:continue
+            if resolved.is_file():resolved.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _purge_now(project):
+    pid=project['id']
+    _delete_external_source(pid)
+    for loc in ('projects','trash'):
+        target=safe_path(pid,loc)
+        if target.exists():
+            checked=safe_path(pid,loc)
+            if checked.resolve()!=target.resolve():raise ValueError('Đường dẫn dự án đã đổi.')
+            _safe_rmtree(checked)
+    with store.connect() as conn:
+        conn.execute('DELETE FROM jobs WHERE project_id=?',(pid,))
+        conn.execute('DELETE FROM projects WHERE id=?',(pid,))
+
+
 def _finish(project,at=None):
     """Idempotent completion of a journaled move/purge after interruption."""
     info=project.get('_retention',{});state=info.get('state','active');pid=project['id']
@@ -119,6 +160,18 @@ def sweep(protect=None,at=None):
                 notes.append(str(exc))
                 try:_rollback_unmoved(project)
                 except (OSError,ValueError):pass
+        from .automation import config as auto_config
+        auto_days=int(auto_config().get('auto_delete_days') or 0)
+        if auto_days>0:
+            for project in store.listing(True):
+                if project.get('diagnostic') or project['id'] in protected or busy(project['id']):continue
+                created=timestamp(project.get('created_at'))
+                if created==datetime.min.replace(tzinfo=timezone.utc):continue
+                if created+timedelta(days=auto_days)<=at:
+                    try:
+                        _purge_now(project);purged.append(project['id'])
+                    except (OSError,ValueError) as exc:
+                        notes.append(str(exc))
     return {'moved':moved,'purged':purged,'warnings':notes,'limit':LIMIT}
 
 

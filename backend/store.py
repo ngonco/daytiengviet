@@ -37,6 +37,7 @@ def init():
         CREATE TABLE IF NOT EXISTS automation_settings (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS automation_items (hash TEXT PRIMARY KEY, data TEXT NOT NULL, updated TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS automation_outputs (hash TEXT NOT NULL, path TEXT NOT NULL, PRIMARY KEY(hash,path));
+        CREATE TABLE IF NOT EXISTS youtube_uploads (id TEXT PRIMARY KEY, source_hash TEXT NOT NULL, export_hash TEXT NOT NULL, project_id TEXT NOT NULL, scheduled_date TEXT NOT NULL, publish_hour TEXT NOT NULL DEFAULT '19:00', title TEXT NOT NULL, status TEXT NOT NULL, video_url TEXT NOT NULL DEFAULT '', created TEXT NOT NULL);
         ''')
         conn.execute("UPDATE jobs SET status='queued', message='Tiếp tục sau khi khởi động lại', updated=? WHERE status='running'", (now(),))
         conn.execute("UPDATE jobs SET status='cancelled', message='Đã hủy trước khi khởi động lại', updated=? WHERE status='cancelling'", (now(),))

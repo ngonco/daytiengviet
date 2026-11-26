@@ -36,13 +36,24 @@ def signature(path):
 
 def config():
     with store.connect() as db:row=db.execute('SELECT data FROM automation_settings WHERE id=1').fetchone()
-    return json.loads(row[0]) if row else {'folder':'','enabled':False,'message':''}
+    base={'folder':'','enabled':False,'message':'','auto_delete_days':0,'youtube_publish_hour':'19:00'}
+    return {**base,**json.loads(row[0])} if row else base
 
 
-def configure(folder=None,enabled=None,message=None,remove_background=None):
+def configure(folder=None,enabled=None,message=None,remove_background=None,auto_delete_days=None,youtube_publish_hour=None):
     with store.LOCK:
         value=config()
         if remove_background is not None:value['remove_background']=bool(remove_background)
+        if auto_delete_days is not None:
+            days=int(auto_delete_days)
+            if days<0 or days>365:raise ValueError('Số ngày tự động xoá phải từ 0 (tắt) đến 365 ngày.')
+            value['auto_delete_days']=days
+        if youtube_publish_hour is not None:
+            hour=str(youtube_publish_hour).strip()
+            parts=hour.split(':')
+            if len(parts)!=2 or not all(p.isdigit() for p in parts) or not (0<=int(parts[0])<=23 and 0<=int(parts[1])<=59):
+                raise ValueError('Giờ đăng YouTube cần có dạng HH:MM (ví dụ 19:00).')
+            value['youtube_publish_hour']=f'{int(parts[0]):02d}:{int(parts[1]):02d}'
         if folder is not None:
             root=Path(folder).expanduser().resolve()
             if not root.is_dir():raise ValueError('Hãy chọn thư mục nguồn đang tồn tại.')
@@ -93,7 +104,7 @@ def snapshot():
             job=store.job_read(row['job_id'])
             if job:row.update(progress=job['progress'],message=job['message'])
     cfg=config()
-    return {'config':{key:cfg[key] for key in ['folder','enabled','message']},'items':rows[:300],'counts':{state:sum(r['state']==state for r in rows) for state in ['waiting','running','retry_wait','done','failed','needs_attention','cancelled']}}
+    return {'config':{key:cfg.get(key) for key in ['folder','enabled','message','remove_background','auto_delete_days','youtube_publish_hour']},'items':rows[:300],'counts':{state:sum(r['state']==state for r in rows) for state in ['waiting','running','retry_wait','done','failed','needs_attention','cancelled']}}
 
 
 def native_folder():
@@ -223,7 +234,9 @@ def dispatch():
             request={'automation_hash':row['hash']}
             if project:
                 row['project_id']=project['id']
-                job=store.job_create(project['id'],'auto_save' if project.get('export') else 'pipeline',request)
+                if project.get('plan') and project.get('preview'):
+                    row.update(state='done',error=None,message='Đã dựng bản nháp, chờ duyệt');put(row);return
+                job=store.job_create(project['id'],'pipeline',request)
             else:
                 from .app import create,Options
                 source=Path(row['source']);before=signature(source)
@@ -239,6 +252,13 @@ def dispatch():
                 job=store.jobs(pid)[0]
             row.update(state='running',job_id=job['id'],error=None);put(row)
         except Exception as exc:failure(row,exc)
+
+
+def mark_draft_ready(code):
+    with store.LOCK:
+        row=get(code)
+        row.update(state='done',error=None,message='Đã dựng bản nháp, chờ duyệt')
+        return put(row)
 
 
 def publish(project,context,code):
@@ -316,8 +336,8 @@ def reconcile():
         if row['state']!='running':continue
         job=store.job_read(row.get('job_id',''))
         if job and job['status'] in ACTIVE:continue
-        if job and job['status']=='succeeded' and row.get('output'):
-            row['state']='done';put(row)
+        if job and job['status']=='succeeded' and (row.get('output') or job['kind']=='pipeline'):
+            row['state']='done';row.setdefault('message','Đã dựng bản nháp, chờ duyệt');put(row)
         elif job and job['status'] in ['failed','cancelled']:
             from .media import Cancelled
             failure(row,Cancelled('Đã dừng tự động dựng.') if job['status']=='cancelled' else RuntimeError(job.get('error') or 'Tác vụ chưa hoàn tất.'))

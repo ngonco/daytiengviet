@@ -122,6 +122,11 @@ class AutomationConfig(BaseModel):
     folder: str | None=None
     enabled: bool | None=None
     remove_background: bool | None=None
+    auto_delete_days: int | None=Field(default=None,ge=0,le=365)
+    youtube_publish_hour: str | None=None
+
+class ApprovePublishBody(BaseModel):
+    start_date: str | None=None
 
 class ProjectTitle(BaseModel):
     title: str=Field(min_length=1,max_length=120)
@@ -134,8 +139,32 @@ def automation_read():
 @app.put('/api/automation')
 def automation_config(body:AutomationConfig):
     from .automation import configure,snapshot
-    configure(body.folder,body.enabled,remove_background=body.remove_background)
+    configure(body.folder,body.enabled,remove_background=body.remove_background,auto_delete_days=body.auto_delete_days,youtube_publish_hour=body.youtube_publish_hour)
     return snapshot()
+
+@app.get('/api/youtube/uploads')
+def youtube_uploads():
+    from .youtube import list_uploads
+    return {'uploads':list_uploads()}
+
+@app.post('/api/youtube/login')
+def youtube_login():
+    from .youtube import open_login_session
+    return open_login_session()
+
+@app.post('/api/projects/{project_id}/approve-publish')
+def approve_publish(project_id:str,body:ApprovePublishBody | None=None):
+    from . import automation, youtube
+    project=store.read(project_id)
+    if not project.get('plan'):
+        raise ValueError('Dự án chưa có phương án dựng.')
+    folder=store.folder(project_id)
+    source_hash=automation.digest(folder/project['source_file'])
+    exp=project.get('export')
+    export_hash=automation.digest(folder/exp['file']) if exp and (folder/exp['file']).is_file() else ''
+    youtube.check_duplicate(source_hash,export_hash)
+    req={'start_date':body.start_date} if body and body.start_date else {}
+    return store.job_create(project_id,'approve_publish',req)
 
 @app.post('/api/automation/folder')
 def automation_folder():

@@ -123,11 +123,11 @@ def execute(job):
             from .seo import lesson_title
             project=store.update(project['id'],title=lesson_title(project))
         automatic=bool(request.get('automation_hash'))
-        result=prepared_render(project,plan,transcript,context,not automatic)
-        project=store.update(project['id'],**{'export' if automatic else 'preview':result,'status':'ready'})
+        result=prepared_render(project,plan,transcript,context,True)
+        project=store.update(project['id'],preview=result,status='ready')
         if automatic:
-            from .automation import publish
-            publish(project,context,request['automation_hash'])
+            from .automation import mark_draft_ready
+            mark_draft_ready(request['automation_hash'])
     elif job['kind'] in ['preview','export']:
         if not project.get('plan'):
             raise ValueError('Dự án chưa có phương án dựng.')
@@ -142,6 +142,30 @@ def execute(job):
             output_record(context.folder/result['file'])
             published=publish_edited(project,context)
             if published:store.update(project['id'],export={**result,'published_file':published})
+    elif job['kind']=='approve_publish':
+        if not project.get('plan'):
+            raise ValueError('Dự án chưa có phương án dựng.')
+        from . import automation, seo, youtube
+        source_hash=automation.digest(context.folder/project['source_file'])
+        existing=project.get('export')
+        if existing and existing.get('revision')==project['revision'] and (context.folder/existing['file']).is_file():
+            result=existing
+        else:
+            context.progress(2,'Đang xuất video Full HD để duyệt và đăng')
+            result=prepared_render(project,project['plan'],project.get('transcript',{}),context,False)
+            project=store.update(project['id'],export=result,status='ready')
+            automation.output_record(context.folder/result['file'])
+        export_path=context.folder/result['file']
+        export_hash=automation.digest(export_path)
+        youtube.check_duplicate(source_hash,export_hash)
+        cfg=automation.config()
+        publish_hour=cfg.get('youtube_publish_hour','19:00')
+        scheduled_date=youtube.next_available_slot(request.get('start_date'))
+        video_title=f'Vietnamese Learn | Bài học: {seo.title(project)}'
+        video_desc=f'Vietnamese learn — Bài học tiếng Việt: {seo.title(project)}. Learn Vietnamese with Vietnamese with Vinh.'
+        uploaded=youtube.upload_and_schedule(export_path,video_title,video_desc,scheduled_date,publish_hour,context)
+        record=youtube.record_upload(project['id'],source_hash,export_hash,scheduled_date,publish_hour,video_title,'scheduled',uploaded.get('video_url',''))
+        store.update(project['id'],youtube=record,status='ready')
     else:
         raise ValueError('Tác vụ không hợp lệ')
 
