@@ -99,17 +99,8 @@ def rounded_mask(size,radius):
     ImageDraw.Draw(image).rounded_rectangle((0,0,size[0]-1,size[1]-1),radius=radius,fill=255)
     return image
 
-def make_frame(project,lesson,folder,w,h,target=None):
-    g=geometry(w,h,project.get('options',{}));b=brand();s=g['scale']
-    image=paper(w,h,signature()).copy();draw=ImageDraw.Draw(image)
-    bx,by,bw,bh=g['brand']
-    draw_centered(draw,(bx,by,bw,bh),b['name'],29*s,21*s,b['ink'],bold=True,max_lines=1)
-    x,y,sw,sh=g['speaker']
-    pad=max(2,round(5*s))
-    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g.get('speaker_radius',g['radius'])+pad,fill=b['border'])
-    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g.get('speaker_radius',g['radius']),fill=b['paper'])
-    cx,cy,cw,ch=g['content']
-    draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill=b['card'])
+def _card_layout(g,lesson):
+    cx,cy,cw,ch=g['content'];s=g['scale']
     inset=round(30*s);iw=cw-2*inset
     chunks=lesson.get('chunks',[])
     chip_height=round(82*s) if chunks else 0
@@ -118,6 +109,76 @@ def make_frame(project,lesson,folder,w,h,target=None):
     vi_height=available*.63;en_height=available-vi_height-gap
     vi_rect=(cx+inset,cy+inset,iw,vi_height)
     en_rect=(cx+inset,cy+inset+vi_height+gap,iw,en_height)
+    return cx,cy,cw,ch,s,inset,iw,chunks,chip_height,gap,vi_height,vi_rect,en_rect
+
+def make_photo_tile(project,lesson,asset_id,folder,pw,ph,extra_scale=1.0):
+    b=brand();s=max(pw,ph)/1000.0
+    tw,th=max(2,round(pw*extra_scale)),max(2,round(ph*extra_scale))
+    asset=project.get('assets',{}).get(asset_id) if asset_id else None
+    if asset:
+        with Image.open(folder/'assets'/asset['file']) as raw:
+            raw=ImageOps.exif_transpose(raw).convert('RGB')
+            ratio='9:16' if ph<pw else '16:9'
+            if project.get('options',{}).get('ratio')=='9:16':ratio='9:16'
+            elif project.get('options',{}).get('ratio')=='16:9':ratio='16:9'
+            else:
+                meta=project.get('metadata',{})
+                ratio='9:16' if meta.get('height',0)>meta.get('width',0) else '16:9'
+            return cover(raw,(tw,th),lesson.get('photo_crops',{}).get(ratio))
+    fill=Image.new('RGB',(tw,th),b['pastel']);pd=ImageDraw.Draw(fill)
+    draw_centered(pd,(tw*.12,th*.25,tw*.76,th*.5),lesson['vi'],70*s*extra_scale,20*s*extra_scale,b['ink'],True,max_lines=4)
+    return fill
+
+def make_lesson_layers(project,lesson,folder,w,h):
+    """Return transparent-slot base frame plus separate RGBA text layers for animated rendering."""
+    g=geometry(w,h,project.get('options',{}));b=brand()
+    cx,cy,cw,ch,s,inset,iw,chunks,chip_height,gap,vi_height,vi_rect,en_rect=_card_layout(g,lesson)
+    base=paper(w,h,signature()).copy();draw=ImageDraw.Draw(base)
+    bx,by,bw,bh=g['brand']
+    draw_centered(draw,(bx,by,bw,bh),b['name'],29*s,21*s,b['ink'],bold=True,max_lines=1)
+    x,y,sw,sh=g['speaker'];pad=max(2,round(5*s))
+    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g.get('speaker_radius',g['radius'])+pad,fill=b['border'])
+    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g.get('speaker_radius',g['radius']),fill=b['paper'])
+    draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill=b['card'])
+    # Punch transparent rounded slot at g['photo'] so animated photo layers sit cleanly behind it.
+    px,py,pw,ph=g['photo']
+    slot_mask=rounded_mask((pw,ph),g['radius'])
+    alpha=base.getchannel('A')
+    alpha.paste(ImageOps.invert(slot_mask),(px,py))
+    base.putalpha(alpha)
+
+    vi_img=Image.new('RGBA',(w,h),(0,0,0,0));vd=ImageDraw.Draw(vi_img)
+    max_vi=(176 if g['portrait'] else 158)*s
+    draw_centered(vd,vi_rect,lesson['vi'],max_vi,44*s,b['ink'],True,not g['portrait'],5)
+    line_y=round(cy+inset+vi_height+gap*.35)
+    vd.rounded_rectangle((cx+cw*.22,line_y,cx+cw*.78,line_y+max(2,round(5*s))),radius=max(1,round(3*s)),fill=b['gold'])
+
+    en_img=Image.new('RGBA',(w,h),(0,0,0,0));ed=ImageDraw.Draw(en_img)
+    draw_centered(ed,en_rect,lesson['en'],(78 if g['portrait'] else 72)*s,28*s,b['accent'],True,not g['portrait'],4)
+
+    chunks_img=None
+    if chunks:
+        chunks_img=Image.new('RGBA',(w,h),(0,0,0,0));cd=ImageDraw.Draw(chunks_img)
+        spacing=round(12*s);chip_w=(iw-(len(chunks)-1)*spacing)/len(chunks)
+        colors=[b['pastel'],'#EEF3F7','#E9EEF1']
+        for i,chunk in enumerate(chunks):
+            xx=cx+inset+i*(chip_w+spacing);yy=cy+ch-inset-chip_height
+            cd.rounded_rectangle((xx,yy,xx+chip_w,yy+chip_height),radius=round(18*s),fill=colors[i])
+            draw_centered(cd,(xx+8*s,yy+6*s,chip_w-16*s,chip_height*.49),chunk['vi'],31*s,22*s,b['ink'],True,max_lines=1)
+            draw_centered(cd,(xx+8*s,yy+chip_height*.53,chip_w-16*s,chip_height*.40),chunk['en'],23*s,17*s,b['ink'],max_lines=1)
+    return {'base':base,'vi':vi_img,'en':en_img,'chunks':chunks_img,'geometry':g}
+
+def make_frame(project,lesson,folder,w,h,target=None):
+    g=geometry(w,h,project.get('options',{}));b=brand()
+    cx,cy,cw,ch,s,inset,iw,chunks,chip_height,gap,vi_height,vi_rect,en_rect=_card_layout(g,lesson)
+    image=paper(w,h,signature()).copy();draw=ImageDraw.Draw(image)
+    bx,by,bw,bh=g['brand']
+    draw_centered(draw,(bx,by,bw,bh),b['name'],29*s,21*s,b['ink'],bold=True,max_lines=1)
+    x,y,sw,sh=g['speaker']
+    pad=max(2,round(5*s))
+    draw.rounded_rectangle((x-pad,y-pad,x+sw+pad,y+sh+pad),radius=g.get('speaker_radius',g['radius'])+pad,fill=b['border'])
+    draw.rounded_rectangle((x,y,x+sw,y+sh),radius=g.get('speaker_radius',g['radius']),fill=b['paper'])
+    draw.rounded_rectangle((cx,cy,cx+cw,cy+ch),radius=g['radius'],fill=b['card'])
     max_vi=(176 if g['portrait'] else 158)*s
     draw_centered(draw,vi_rect,lesson['vi'],max_vi,44*s,b['ink'],True,not g['portrait'],5)
     # A quiet pastel rule separates the target sentence from its meaning.
@@ -134,17 +195,8 @@ def make_frame(project,lesson,folder,w,h,target=None):
             draw_centered(draw,(xx+8*s,yy+chip_height*.53,chip_w-16*s,chip_height*.40),chunk['en'],23*s,17*s,b['ink'],max_lines=1)
     px,py,pw,ph=g['photo']
     mask=rounded_mask((pw,ph),g['radius'])
-    asset=project.get('assets',{}).get(lesson.get('asset_id'))
-    if asset:
-        with Image.open(folder/'assets'/asset['file']) as raw:
-            raw=ImageOps.exif_transpose(raw).convert('RGB')
-            ratio='9:16' if g['portrait'] else '16:9'
-            photo=cover(raw,(pw,ph),lesson.get('photo_crops',{}).get(ratio))
-        image.paste(photo,(px,py),mask)
-    else:
-        fill=Image.new('RGB',(pw,ph),b['pastel']);pd=ImageDraw.Draw(fill)
-        draw_centered(pd,(pw*.12,ph*.25,pw*.76,ph*.5),lesson['vi'],70*s,30*s,b['ink'],True,max_lines=4)
-        image.paste(fill,(px,py),mask)
+    photo=make_photo_tile(project,lesson,lesson.get('asset_id'),folder,pw,ph)
+    image.paste(photo,(px,py),mask)
     if target is None:return image.convert('RGB')
     image.convert('RGB').save(target)
     return g

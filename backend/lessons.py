@@ -95,7 +95,7 @@ Trả JSON {"lessons":[{"start":0,"end":120,"vi":"từ hoặc câu tiếng Việ
     for item in plan['lessons']:
         old=previous.get(lesson_key(item['vi']))
         if old:
-            for field in ['asset_id','photo_crops','photo_candidates']:
+            for field in ['asset_id','photo_crops','photo_candidates','photo_playlist']:
                 if field in old:item[field]=copy.deepcopy(old[field])
     return validate_plan(plan,duration)
 

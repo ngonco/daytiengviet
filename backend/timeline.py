@@ -65,13 +65,32 @@ class Lesson(Timed):
     asset_id: str | None = None
     locked: bool = False
     photo_candidates: list[str] = Field(default_factory=list, max_length=10)
+    photo_playlist: list[str] | None = Field(default=None, max_length=20)
     photo_crops: dict[Literal['9:16','16:9'],PhotoCrop] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def distinct_photos(self):
         if len(set(self.photo_candidates)) != len(self.photo_candidates):
             raise ValueError('Bộ ảnh không được chứa ảnh trùng.')
+        if self.photo_playlist is not None and len(set(self.photo_playlist)) != len(self.photo_playlist):
+            raise ValueError('Danh sách luân chuyển không được chứa ảnh trùng.')
         return self
+
+
+def lesson_photo_sequence(lesson, assets):
+    """Return ordered, existing asset IDs to cycle through for a lesson."""
+    assets = assets or {}
+    playlist = lesson.get('photo_playlist')
+    if playlist is not None:
+        seq = [aid for aid in playlist if aid in assets]
+        if seq:
+            return seq
+    primary = lesson.get('asset_id')
+    seq = [primary] if primary and primary in assets else []
+    for cid in lesson.get('photo_candidates', []):
+        if cid in assets and cid not in seq:
+            seq.append(cid)
+    return seq
 
 class Pause(BaseModel):
     model_config=ConfigDict(extra='forbid',allow_inf_nan=False)

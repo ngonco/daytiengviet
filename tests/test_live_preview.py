@@ -98,5 +98,20 @@ class LivePreviewTests(unittest.TestCase):
         b=self.request(options={**self.options,'speaker_x':.9,'speaker_y':.9,'speaker_scale':1.4}).json()
         self.assertNotEqual(a['speaker_transform'],b['speaker_transform'])
 
+    def test_animate_media_returns_layers_and_photo_playlist(self):
+        Image.new('RGB',(400,300),'#2a8c55').save(self.folder/'assets/p2.jpg')
+        store.update(self.id,assets={'p':{'file':'p.jpg'},'p2':{'file':'p2.jpg'}})
+        lesson={**self.lesson,'chunks':[{'vi':'Xin','en':'Please'}],'photo_candidates':['p','p2']}
+        static=self.request(lesson=lesson,options={**self.options,'animate_media':False}).json()
+        self.assertNotIn('layers',static)
+        animated=self.request(lesson=lesson,options={**self.options,'animate_media':True,'photo_interval':4}).json()
+        self.assertTrue(animated['animate_media'])
+        self.assertEqual(animated['photo_interval'],4.0)
+        self.assertEqual(len(animated['photos']),2)
+        self.assertTrue(animated['layers']['base'].startswith('data:image/png;base64,'))
+        self.assertTrue(animated['layers']['vi'].startswith('data:image/png;base64,'))
+        self.assertTrue(animated['layers']['en'].startswith('data:image/png;base64,'))
+        self.assertTrue(animated['layers']['chunks'].startswith('data:image/png;base64,'))
+
 
 if __name__=='__main__':unittest.main()

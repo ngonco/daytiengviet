@@ -41,6 +41,8 @@ class Options(BaseModel):
     portrait_layout: Literal['classic','circle']='classic'
     cut_strength: Literal['none','light','medium','strong']='strong'
     speaker_size: float=Field(default=.25,ge=.15,le=.4)
+    animate_media: bool=False
+    photo_interval: float=Field(default=5.0,ge=3.0,le=12.0)
     video_frames: dict[Literal['9:16','16:9'],VideoFrame]=Field(default_factory=dict)
     background_removal: BackgroundRemoval=Field(default_factory=BackgroundRemoval)
 
@@ -64,6 +66,8 @@ class DraftLesson(BaseModel):
     en: str=Field(default='',max_length=1000)
     chunks: list[DraftChunk]=Field(default_factory=list,max_length=3)
     asset_id: str | None=None
+    photo_candidates: list[str]=Field(default_factory=list,max_length=10)
+    photo_playlist: list[str] | None=Field(default=None,max_length=20)
     photo_crops: dict[Literal['9:16','16:9'],PhotoCrop]=Field(default_factory=dict)
 
 class DraftCaption(BaseModel):
@@ -220,6 +224,8 @@ def create(source:Path,title,options,project_id=None,move=False,job_request=None
     if values.get('layout_mode')=='lesson':
         values['landscape_layout']='circle'
         values['portrait_layout']='circle'
+        if 'animate_media' not in options.model_fields_set:
+            values['animate_media']=True
     project={'id':project_id,'title':title[:120] or 'Bài học mới','source_file':target.name,'original_name':source.name,'metadata':metadata,'options':values,'status':'new','revision':0,'plan':None,'transcript':None,'assets':{},'frames':[],'warnings':[],'preview':None,'export':None,'music_file':None,'created_at':store.now()}
     project['title_mode']='auto' if title.strip() in ['', 'Bài học mới', 'Bài học tiếng Việt'] else 'manual'
     store.save(project)
@@ -421,7 +427,7 @@ def save_plan(project_id:str,body:SavePlan):
         for visual in [*plan['visuals'],*plan['lessons']]:
             if visual.get('asset_id') and visual['asset_id'] not in project['assets']:
                 raise ValueError('Ảnh chưa được tải vào dự án.')
-            if any(i not in project['assets'] for i in visual.get('photo_candidates',[])):
+            if any(i not in project['assets'] for i in [*visual.get('photo_candidates',[]),*(visual.get('photo_playlist') or [])]):
                 raise ValueError('Bộ ảnh có ảnh chưa được tải vào dự án.')
         worker.version(project)
         options=body.options.model_dump()
@@ -472,7 +478,7 @@ def restore(project_id:str,body:RestoreBody):
         old=json.loads(path.read_text(encoding='utf-8'))
         worker.version(project)
         restored=validate_plan(old['plan'],project['metadata']['duration'])
-        if any(i not in project.get('assets',{}) for l in restored.get('lessons',[]) for i in l.get('photo_candidates',[])):
+        if any(i not in project.get('assets',{}) for l in restored.get('lessons',[]) for i in [*l.get('photo_candidates',[]),*(l.get('photo_playlist') or [])]):
             raise ValueError('Phiên bản này tham chiếu bộ ảnh chưa có trong dự án.')
         restored_options=Options.model_validate(old['options']).model_dump()
         validate_duration(restored_options,project['metadata']['duration'])
@@ -659,7 +665,7 @@ def import_project(file:UploadFile=File(...)):
                 raise ValueError('Đường dẫn ảnh không hợp lệ.')
         if project.get('plan'):
             for lesson in project['plan'].get('lessons',[]):
-                if any(i not in project.get('assets',{}) for i in lesson.get('photo_candidates',[])):
+                if any(i not in project.get('assets',{}) for i in [*lesson.get('photo_candidates',[]),*(lesson.get('photo_playlist') or [])]):
                     raise ValueError('Bộ ảnh trong ZIP thiếu dữ liệu ảnh.')
         if project.get('music_file') and Path(project['music_file']).name!=project['music_file']:
             raise ValueError('Đường dẫn nhạc không hợp lệ.')

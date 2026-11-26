@@ -6,7 +6,8 @@ import io
 import json
 import threading
 from pathlib import Path
-from .templates import geometry,signature,make_frame,speaker_transform,subtitle_position,brand
+from .templates import geometry,signature,make_frame,make_lesson_layers,make_photo_tile,speaker_transform,subtitle_position,brand
+from .timeline import lesson_photo_sequence
 from .lesson_render import subtitle_image
 from .render import dimensions
 from .matting_schema import BackgroundRemoval
@@ -63,7 +64,32 @@ def scene(project,folder,lesson,caption,sequence=0):
         sub=png_cached({'kind':'subtitle','geometry':g,'size':[w,h],'theme':theme,'vi':caption['vi'],'en':caption['en']},lambda:subtitle_image(caption,w,h,options=project['options']))
         with ImageReader(sub) as image:tw,th=image.size
         x,y=subtitle_position(w,h,tw,th,project['options']);position=[x,y,tw,th]
-    return {'sequence':sequence,'width':w,'height':h,'geometry':g,'speaker_transform':speaker_transform(project,w,h),'page':data_url(page),'subtitle':data_url(sub) if sub else None,'subtitle_rect':position,'source':source_info(project,folder)}
+    animate=bool(project['options'].get('animate_media'))
+    extra={}
+    if animate:
+        layers=make_lesson_layers(project,lesson,folder,w,h)
+        text_key={'geometry':g,'theme':theme,'size':[w,h],'vi':lesson.get('vi',''),'en':lesson.get('en',''),'chunks':lesson.get('chunks',[])}
+        base_png=png_cached({'kind':'layer-base','geometry':g,'theme':theme,'size':[w,h]},lambda:layers['base'])
+        vi_png=png_cached({'kind':'layer-vi',**text_key},lambda:layers['vi'])
+        en_png=png_cached({'kind':'layer-en',**text_key},lambda:layers['en'])
+        chunks_png=png_cached({'kind':'layer-chunks',**text_key},lambda:layers['chunks']) if layers['chunks'] else None
+        px,py,pw,ph=g['photo']
+        seq=lesson_photo_sequence(lesson,project.get('assets')) or [None]
+        photos=[]
+        for aid in seq:
+            afp=None
+            if aid:
+                asset=project.get('assets',{}).get(aid)
+                if asset and Path(asset['file']).name==asset['file']:
+                    try:
+                        st=(folder/'assets'/asset['file']).stat()
+                        afp=[aid,st.st_size,st.st_mtime_ns]
+                    except OSError:
+                        continue
+            tile=png_cached({'kind':'photo-tile','size':[pw,ph],'crops':lesson.get('photo_crops'),'asset':afp,'vi':'' if aid else lesson.get('vi','')},lambda a=aid:make_photo_tile(project,lesson,a,folder,pw,ph))
+            photos.append(data_url(tile))
+        extra={'animate_media':True,'photo_interval':float(project['options'].get('photo_interval',5.0)),'layers':{'base':data_url(base_png),'vi':data_url(vi_png),'en':data_url(en_png),'chunks':data_url(chunks_png) if chunks_png else None},'photos':photos}
+    return {'sequence':sequence,'width':w,'height':h,'geometry':g,'speaker_transform':speaker_transform(project,w,h),'page':data_url(page),'subtitle':data_url(sub) if sub else None,'subtitle_rect':position,'source':source_info(project,folder),**extra}
 
 
 def ImageReader(raw):

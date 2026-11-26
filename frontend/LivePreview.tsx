@@ -6,7 +6,7 @@ import {configurePreviewAudio,resumePreviewAudio,releasePreviewAudio} from './au
 import {keepSpans,sourceTime} from './output_timeline';
 import {defaultFrame,type VideoFrame} from './editing';
 import {PhotoHotspot} from './PhotoHotspot';
-type Scene={sequence:number;width:number;height:number;geometry:{photo:number[];speaker:number[];radius:number;speaker_radius?:number;circle?:boolean};speaker_transform:{left:number;top:number;width:number;height:number};page:string;subtitle:string|null;subtitle_rect:number[]|null;source:{file:string;state:string;message?:string}};
+type Scene={sequence:number;width:number;height:number;geometry:{photo:number[];speaker:number[];radius:number;speaker_radius?:number;circle?:boolean};speaker_transform:{left:number;top:number;width:number;height:number};page:string;subtitle:string|null;subtitle_rect:number[]|null;source:{file:string;state:string;message?:string};animate_media?:boolean;photo_interval?:number;layers?:{base:string;vi:string;en:string;chunks:string|null};photos?:string[]};
 type Props={onPhotoSearch:(lessonId:string)=>void;controllerRef:React.RefObject<PlaybackController|null>;seekRequest:{time:number;seq:number}|null;onOutputTime:(t:number)=>void;initialOutput:number;project:any;plan:any;options:any;videoRef:React.RefObject<HTMLVideoElement|null>;busy:boolean;dirty:boolean;onTime:(time:number)=>void;onPlay:(playing:boolean)=>void;onPrepare:()=>void;onSizeChange:(size:number)=>void;onLayoutChange:(key:'portrait_layout'|'landscape_layout',layout:'classic'|'circle')=>void;onFrameChange:(key:string,frame:VideoFrame)=>void};
 const media=(id:string,path:string)=>`/api/projects/${id}/media/${path.split('/').map(encodeURIComponent).join('/')}`;
 const at=(items:any[],time:number)=>items.find(i=>i.start<=time&&i.end>time);
@@ -60,20 +60,44 @@ export default function LivePreview({onPhotoSearch,controllerRef,seekRequest,onO
  const frameKey=scene&&scene.height>scene.width?'9:16':'16:9';
  const contain=s?Math.min(s[2]/project.metadata.width,s[3]/project.metadata.height):1;
  const frame:VideoFrame=options.video_frames?.[frameKey]||(s&&tr?{zoom:tr.width/(project.metadata.width*contain),x:(tr.left-(s[2]-tr.width)/2)/s[2],y:(tr.top-(s[3]-tr.height)/2)/s[3]}:defaultFrame);
+ const animated=!!(scene?.animate_media&&scene.layers&&scene.photos?.length);
+ const photoInterval=Math.max(3,scene?.photo_interval||options.photo_interval||5);
+ const photoIndex=animated&&lesson?Math.max(0,Math.floor(Math.max(0,time-lesson.start)/photoInterval))%scene!.photos!.length:0;
+ const prevPhotoRef=useRef<{lessonId:string;index:number;src:string}|null>(null);
+ const [prevPhoto,setPrevPhoto]=useState<string|null>(null);
+ useEffect(()=>{
+  if(!animated||!lesson){prevPhotoRef.current=null;setPrevPhoto(null);return}
+  const curSrc=scene!.photos![photoIndex];
+  const prev=prevPhotoRef.current;
+  if(prev&&prev.lessonId===lesson.id&&prev.index!==photoIndex){setPrevPhoto(prev.src)}else if(!prev||prev.lessonId!==lesson.id){setPrevPhoto(null)}
+  prevPhotoRef.current={lessonId:lesson.id,index:photoIndex,src:curSrc};
+ },[animated,lesson?.id,photoIndex,scene?.photos]);
  function changeFrame(change:Partial<VideoFrame>){const next={...frame,...change};onFrameChange(frameKey,{zoom:Math.max(.25,Math.min(4,next.zoom)),x:Math.max(-1,Math.min(1,next.x)),y:Math.max(-1,Math.min(1,next.y))})}
  return <>
   <div className="live-stage" ref={stageRef}>
    {scene&&g&&s&&tr?<div className="live-surface" style={{width:fitted.width,height:fitted.height,visibility:fitted.width?'visible':'hidden'}}>
-    <img className="live-page" src={scene.page} alt="Khung bài học đang chỉnh sửa"/>
+    {animated&&scene.layers&&scene.photos?.length?<>
+     <div className="live-photo-slot" style={{left:`${g.photo[0]/scene.width*100}%`,top:`${g.photo[1]/scene.height*100}%`,width:`${g.photo[2]/scene.width*100}%`,height:`${g.photo[3]/scene.height*100}%`}}>
+      {prevPhoto&&<img className="live-photo-img prev" src={prevPhoto} alt=""/>}
+      <img key={`${lesson?.id}-${photoIndex}`} className={`live-photo-img kb-${photoIndex%4} ${prevPhoto?'fade-in':''}`} style={{animationDuration:`${photoInterval}s, 0.4s`}} src={scene.photos[photoIndex]} alt=""/>
+     </div>
+     <img className="live-page" src={scene.layers.base} alt="Khung bài học đang chỉnh sửa"/>
+     <img key={`vi-${lesson?.id}`} className="live-text-layer anim-vi" src={scene.layers.vi} alt=""/>
+     <img key={`en-${lesson?.id}`} className="live-text-layer anim-en" src={scene.layers.en} alt=""/>
+     {scene.layers.chunks&&<img key={`ch-${lesson?.id}`} className="live-text-layer anim-chunks" src={scene.layers.chunks} alt=""/>}
+    </>:<img className="live-page" src={scene.page} alt="Khung bài học đang chỉnh sửa"/>}
     {lesson&&<PhotoHotspot disabled={busy} onClick={()=>onPhotoSearch(lesson.id)} style={{left:`${g.photo[0]/scene.width*100}%`,top:`${g.photo[1]/scene.height*100}%`,width:`${g.photo[2]/scene.width*100}%`,height:`${g.photo[3]/scene.height*100}%`}}/>}
     <div className="live-speaker draggable-video" title="Kéo để chỉnh vị trí video trong khung" onPointerDown={e=>{if(busy)return;e.currentTarget.setPointerCapture(e.pointerId);const r=e.currentTarget.getBoundingClientRect();drag.current={px:e.clientX,py:e.clientY,width:r.width,height:r.height,frame:{...frame}}}} onPointerMove={e=>{const d=drag.current;if(!d||busy)return;changeFrame({zoom:d.frame.zoom,x:Math.max(-1,Math.min(1,d.frame.x+(e.clientX-d.px)/d.width)),y:Math.max(-1,Math.min(1,d.frame.y+(e.clientY-d.py)/d.height))})}} onPointerUp={()=>{drag.current=null}} onPointerCancel={()=>{drag.current=null}} style={{left:`${s[0]/scene.width*100}%`,top:`${s[1]/scene.height*100}%`,width:`${s[2]/scene.width*100}%`,height:`${s[3]/scene.height*100}%`,borderRadius:`${(g.speaker_radius??g.radius)/s[2]*100}% / ${(g.speaker_radius??g.radius)/s[3]*100}%`,background: '#F7F3EB'}}>
      <video ref={videoRef} playsInline preload="auto" src={media(project.id,scene.source.file)} style={{left:`${tr.left/s[2]*100}%`,top:`${tr.top/s[3]*100}%`,width:`${tr.width/s[2]*100}%`,height:`${tr.height/s[3]*100}%`}} onLoadedMetadata={e=>{e.currentTarget.currentTime=Math.min(timeRef.current,project.metadata.duration)}} />
     </div>
-    {!activePause&&scene.subtitle&&scene.subtitle_rect&&<img className="live-subtitle" alt="Phụ đề đang chỉnh sửa" src={scene.subtitle} style={{left:`${scene.subtitle_rect[0]/scene.width*100}%`,top:`${scene.subtitle_rect[1]/scene.height*100}%`,width:`${scene.subtitle_rect[2]/scene.width*100}%`,height:`${scene.subtitle_rect[3]/scene.height*100}%`}}/>}
+    {!activePause&&scene.subtitle&&scene.subtitle_rect&&<img key={animated?`sub-${caption?.id}`:'sub'} className={`live-subtitle ${animated?'anim-sub':''}`} alt="Phụ đề đang chỉnh sửa" src={scene.subtitle} style={{left:`${scene.subtitle_rect[0]/scene.width*100}%`,top:`${scene.subtitle_rect[1]/scene.height*100}%`,width:`${scene.subtitle_rect[2]/scene.width*100}%`,height:`${scene.subtitle_rect[3]/scene.height*100}%`}}/>}
    </div>:<span>Đang chuẩn bị khung xem trực tiếp…</span>}
   </div>
-  <details className="frame-settings"><summary>Chỉnh khung, zoom và vị trí nhân vật</summary><fieldset disabled={busy||!scene} className="video-frame-controls">{<><label>{frameKey==='9:16'?'Bố cục dọc':'Bố cục ngang'}<select aria-label="Bố cục video" value={options[frameKey==='9:16'?'portrait_layout':'landscape_layout']||'classic'} onChange={e=>onLayoutChange(frameKey==='9:16'?'portrait_layout':'landscape_layout',e.target.value as 'classic'|'circle')}><option value="circle">{frameKey==='9:16'?'Video tròn · dưới căn giữa':'Ảnh trái · chữ phải · mặt tròn'}</option><option value="classic">Bố cục cũ</option></select></label>{g?.circle&&<label>Kích thước vòng tròn · {Math.round((options.speaker_size??.25)*100)}% chiều cao<input aria-label="Kích thước vòng tròn" type="range" min=".15" max=".4" step=".01" value={options.speaker_size??.25} onChange={e=>onSizeChange(Number(e.target.value))}/></label>}</>}<label>Zoom video trong khung · {Math.round(frame.zoom*100)}%<input aria-label="Zoom video trong khung" type="range" min=".25" max="4" step=".01" value={frame.zoom} onChange={e=>changeFrame({zoom:Number(e.target.value)})}/></label><label>Vị trí ngang<input aria-label="Vị trí video ngang" type="range" min="-1" max="1" step=".01" value={frame.x} onChange={e=>changeFrame({x:Number(e.target.value)})}/></label><label>Vị trí dọc<input aria-label="Vị trí video dọc" type="range" min="-1" max="1" step=".01" value={frame.y} onChange={e=>changeFrame({y:Number(e.target.value)})}/></label><button className="secondary" onClick={()=>onFrameChange(frameKey,{...defaultFrame})}>Đặt lại video</button><small>Kéo video để can vị trí · Toàn video · Lưu riêng khung {frameKey}</small></fieldset></details>
-  <div className="live-controls"><button className="secondary" disabled={!scene} onClick={()=>controllerRef.current?.toggle()}>{playing?'Tạm dừng':'Phát'}</button><input aria-label="Tua bản xem trực tiếp" type="range" min="0" max={assemblyDuration} step=".033333" value={Math.min(outCursor,assemblyDuration)} onChange={e=>controllerRef.current?.seek(Number(e.target.value))}/></div>
+  <div className="live-controls">
+   <button className="secondary" disabled={!scene} onClick={()=>controllerRef.current?.toggle()}>{playing?'Tạm dừng':'Phát'}</button>
+   <input aria-label="Tua bản xem trực tiếp" type="range" min="0" max={assemblyDuration} step=".033333" value={Math.min(outCursor,assemblyDuration)} onChange={e=>controllerRef.current?.seek(Number(e.target.value))}/>
+   <details className="frame-settings inline-popover"><summary>Khung &amp; vị trí</summary><fieldset disabled={busy||!scene} className="video-frame-controls popover-card">{<><label>{frameKey==='9:16'?'Bố cục dọc':'Bố cục ngang'}<select aria-label="Bố cục video" value={options[frameKey==='9:16'?'portrait_layout':'landscape_layout']||'classic'} onChange={e=>onLayoutChange(frameKey==='9:16'?'portrait_layout':'landscape_layout',e.target.value as 'classic'|'circle')}><option value="circle">{frameKey==='9:16'?'Video tròn · dưới căn giữa':'Ảnh trái · chữ phải · mặt tròn'}</option><option value="classic">Bố cục cũ</option></select></label>{g?.circle&&<label>Kích thước vòng tròn · {Math.round((options.speaker_size??.25)*100)}% chiều cao<input aria-label="Kích thước vòng tròn" type="range" min=".15" max=".4" step=".01" value={options.speaker_size??.25} onChange={e=>onSizeChange(Number(e.target.value))}/></label>}</>}<label>Zoom video trong khung · {Math.round(frame.zoom*100)}%<input aria-label="Zoom video trong khung" type="range" min=".25" max="4" step=".01" value={frame.zoom} onChange={e=>changeFrame({zoom:Number(e.target.value)})}/></label><label>Vị trí ngang<input aria-label="Vị trí video ngang" type="range" min="-1" max="1" step=".01" value={frame.x} onChange={e=>changeFrame({x:Number(e.target.value)})}/></label><label>Vị trí dọc<input aria-label="Vị trí video dọc" type="range" min="-1" max="1" step=".01" value={frame.y} onChange={e=>changeFrame({y:Number(e.target.value)})}/></label><button className="secondary" onClick={()=>onFrameChange(frameKey,{...defaultFrame})}>Đặt lại video</button><small>Kéo video để can vị trí · Toàn video · Lưu riêng khung {frameKey}</small></fieldset></details>
+  </div>
   {audioStatus&&<p className="audio-status" role="status">{audioStatus}</p>}
   {audioError&&<p className="live-warning" role="alert">{audioError}</p>}
   {error&&<p className="live-warning" role="alert">{error} Khung đang giữ trạng thái hợp lệ gần nhất.</p>}

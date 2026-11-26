@@ -52,4 +52,22 @@ class LessonRenderTests(unittest.TestCase):
             self.assertEqual(reused['digest'],result['digest'])
             self.assertEqual(reused['revision'],2)
 
+    def test_animated_multi_photo_and_text_layers_render(self):
+        with TemporaryDirectory() as tmp:
+            folder=Path(tmp);(folder/'assets').mkdir()
+            Image.new('RGB',(400,300),'#2a8c55').save(folder/'assets/p1.jpg')
+            Image.new('RGB',(400,300),'#c85232').save(folder/'assets/p2.jpg')
+            ffmpeg(['-f','lavfi','-i','testsrc2=size=320x180:rate=30','-f','lavfi','-i','sine=frequency=330:sample_rate=48000','-t','7','-c:v','libx264','-c:a','aac',folder/'source.mp4'])
+            project={'metadata':{'duration':7,'width':320,'height':180},'options':{'ratio':'9:16','layout_mode':'lesson','portrait_layout':'circle','animate_media':True,'photo_interval':3.0,'subtitles':'bilingual','sfx':False},'source_file':'source.mp4','assets':{'p1':{'file':'p1.jpg'},'p2':{'file':'p2.jpg'}},'revision':1,'frames':[]}
+            plan={'schema_version':2,'lessons':[{'id':'l','start':0,'end':7,'vi':'Cà phê sữa đá','en':'Iced milk coffee','chunks':[{'vi':'Cà phê','en':'Coffee'}],'asset_id':'p1','photo_candidates':['p1','p2']}],'captions':[{'id':'a','start':0.5,'end':3.5,'vi':'Đọc theo mình','en':'Repeat after me'}],'cuts':[],'visuals':[]}
+            result=render(project,plan,{},Context(folder),True)
+            output=folder/result['file']
+            data=json.loads(subprocess.run([binary('ffprobe'),'-v','error','-show_format','-of','json',str(output)],check=True,capture_output=True).stdout)
+            self.assertAlmostEqual(float(data['format']['duration']),7,delta=.15)
+            for i,at in enumerate([1.0,4.5]):ffmpeg(['-ss',at,'-i',output,'-frames:v','1',folder/f'anim{i}.png'])
+            x,y,w,h=geometry(result['width'],result['height'],project['options'])['photo']
+            with Image.open(folder/'anim0.png') as a,Image.open(folder/'anim1.png') as b:
+                diff=ImageChops.difference(a.crop((x+20,y+20,x+w-20,y+h-20)),b.crop((x+20,y+20,x+w-20,y+h-20)))
+                self.assertGreater(sum(ImageStat.Stat(diff).mean)/3,30)
+
 if __name__=='__main__':unittest.main()

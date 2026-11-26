@@ -4,12 +4,12 @@ import hashlib
 import json
 import math
 from PIL import Image,ImageDraw
-from .timeline import keep_spans,map_interval,assembly_spans
+from .timeline import keep_spans,map_interval,assembly_spans,lesson_photo_sequence
 from .media import ffmpeg
 from .store import atomic_json
-from .templates import geometry,signature,make_frame,rounded_mask,speaker_transform,speaker_filter,font,fit_text,subtitle_region,subtitle_position
+from .templates import geometry,signature,make_frame,make_lesson_layers,make_photo_tile,rounded_mask,speaker_transform,speaker_filter,font,fit_text,subtitle_region,subtitle_position
 
-LESSON_RENDER_VERSION=10
+LESSON_RENDER_VERSION=11
 
 def digest(value):
     return hashlib.sha256(json.dumps(value,ensure_ascii=False,sort_keys=True).encode()).hexdigest()[:24]
@@ -70,12 +70,37 @@ def render_lessons(project,plan,transcript,context,preview=True):
             for a,b in map_interval(caption['start'],caption['end'],spans):
                 if caption['vi'].strip():captions.append({**item,'output_start':a,'output_end':b})
     tile_dir=folder/'lesson-tiles';tile_dir.mkdir(exist_ok=True)
-    page_paths={}
-    for lesson in lessons:
-        key=digest({'lesson':{k:lesson.get(k) for k in ['vi','en','chunks','asset_id','photo_crops']},'asset':hashes.get(lesson.get('asset_id')),'size':[w,h],'geometry':g,'theme':theme})
-        path=tile_dir/(key+'.png')
-        if not path.exists():make_frame(project,lesson,folder,w,h,path)
-        page_paths[lesson['id']]=path
+    animate=bool(project['options'].get('animate_media'))
+    photo_interval=max(3.0,min(12.0,float(project['options'].get('photo_interval',5.0))))
+    page_paths={};layer_paths={};photo_slots=[]
+    px,py,pw,ph=g['photo']
+    if not animate:
+        for lesson in lessons:
+            key=digest({'lesson':{k:lesson.get(k) for k in ['vi','en','chunks','asset_id','photo_crops']},'asset':hashes.get(lesson.get('asset_id')),'size':[w,h],'geometry':g,'theme':theme})
+            path=tile_dir/(key+'.png')
+            if not path.exists():make_frame(project,lesson,folder,w,h,path)
+            page_paths[lesson['id']]=path
+    else:
+        for lesson in lessons:
+            lkey=digest({'v':LESSON_RENDER_VERSION,'lesson':{k:lesson.get(k) for k in ['vi','en','chunks']},'size':[w,h],'geometry':g,'theme':theme})
+            paths={'base':tile_dir/(lkey+'-base.png'),'vi':tile_dir/(lkey+'-vi.png'),'en':tile_dir/(lkey+'-en.png'),'chunks':tile_dir/(lkey+'-chunks.png')}
+            if not paths['base'].exists() or not paths['vi'].exists() or not paths['en'].exists():
+                layers=make_lesson_layers(project,lesson,folder,w,h)
+                layers['base'].save(paths['base'])
+                layers['vi'].save(paths['vi'])
+                layers['en'].save(paths['en'])
+                if layers['chunks'] is not None:layers['chunks'].save(paths['chunks'])
+            layer_paths[lesson['id']]={k:v for k,v in paths.items() if v.exists()}
+            seq=lesson_photo_sequence(lesson,project.get('assets')) or [None]
+            t_cur=lesson['output_start'];idx=0
+            while t_cur<lesson['output_end']-0.001:
+                t_nxt=min(lesson['output_end'],t_cur+photo_interval)
+                aid=seq[idx%len(seq)]
+                pkey=digest({'size':[pw,ph],'crops':lesson.get('photo_crops'),'asset':hashes.get(aid),'vi':'' if aid else lesson.get('vi','')})
+                ppath=tile_dir/(pkey+'-kb.png')
+                if not ppath.exists():make_photo_tile(project,lesson,aid,folder,pw,ph,1.12).save(ppath)
+                photo_slots.append({'lesson_id':lesson['id'],'start':t_cur,'end':t_nxt,'path':ppath,'kb':idx%4})
+                t_cur=t_nxt;idx+=1
     sx,sy,cw,ch=g['speaker'];mask_path=tile_dir/f'mask-{cw}-{ch}-{g.get("speaker_radius",g["radius"])}.png'
     if not mask_path.exists():rounded_mask((cw,ch),g.get('speaker_radius',g['radius'])).save(mask_path)
     source=folder/project.get('render_source_file',project['source_file'])
@@ -109,15 +134,54 @@ def render_lessons(project,plan,transcript,context,preview=True):
         filters.append('[raw]'+speaker_filter(project,w,h)+'[actor]')
         next_input=len(pieces)
         page_labels=[]
-        for j,lesson in enumerate(local_lessons):
-            args+=['-loop','1','-framerate','30','-i',page_paths[lesson['id']]]
-            a=max(0,lesson['output_start']-start)
-            if j==0:
-                filters.append(f'[{next_input}:v]format=rgba[page0]')
-            else:
-                filters.append(f'[{next_input}:v]format=rgba,fade=t=in:st={a}:d=0.15:alpha=1[pagein{j}]')
-                filters.append(f"[page{j-1}][pagein{j}]overlay=0:0:enable='gte(t,{a})'[page{j}]")
-            page_labels.append(f'page{j}');next_input+=1
+        if not animate:
+            for j,lesson in enumerate(local_lessons):
+                args+=['-loop','1','-framerate','30','-i',page_paths[lesson['id']]]
+                a=max(0,lesson['output_start']-start)
+                if j==0:
+                    filters.append(f'[{next_input}:v]format=rgba[page0]')
+                else:
+                    filters.append(f'[{next_input}:v]format=rgba,fade=t=in:st={a}:d=0.15:alpha=1[pagein{j}]')
+                    filters.append(f"[page{j-1}][pagein{j}]overlay=0:0:enable='gte(t,{a})'[page{j}]")
+                page_labels.append(f'page{j}');next_input+=1
+        else:
+            local_slots=[s for s in photo_slots if s['end']>start and s['start']<end]
+            filters.append(f'color=c=0xF7F3EB:s={pw}x{ph}:r=30:d={length},format=rgba[phbase]')
+            ph_cur='phbase'
+            for k,slot in enumerate(local_slots):
+                sa=max(0,slot['start']-start);sb=min(end,slot['end'])-start
+                sdur=max(1/30,sb-sa);fn=max(2,math.ceil(sdur*30)+1)
+                args+=['-i',slot['path']]
+                kb=slot['kb']
+                if kb==0:zp=f"z='1+0.10*on/{fn}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                elif kb==1:zp=f"z='1.10-0.10*on/{fn}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                elif kb==2:zp=f"z='1.08':x='(iw-iw/zoom)*on/{fn}':y='ih/2-(ih/zoom/2)'"
+                else:zp=f"z='1.08':x='(iw-iw/zoom)*(1-on/{fn})':y='ih/2-(ih/zoom/2)'"
+                fade_expr=f',fade=t=in:st={sa}:d=0.4:alpha=1' if k>0 else ''
+                filters.append(f"[{next_input}:v]zoompan={zp}:d={fn}:s={pw}x{ph}:fps=30,setpts=PTS-STARTPTS+{sa}/TB,format=rgba{fade_expr}[phclip{k}]")
+                filters.append(f"[{ph_cur}][phclip{k}]overlay=0:0:enable='gte(t,{sa})'[ph{k}]")
+                ph_cur=f'ph{k}';next_input+=1
+            filters.append(f'color=c=0xF7F3EB:s={w}x{h}:r=30:d={length},format=rgba[bg0]')
+            filters.append(f'[bg0][{ph_cur}]overlay={px}:{py}[bgph]')
+            args+=['-loop','1','-framerate','30','-i',layer_paths[local_lessons[0]['id']]['base']]
+            filters.append(f'[bgph][{next_input}:v]overlay=0:0[pagebase]')
+            next_input+=1;cur_page='pagebase'
+            slide_px=max(8,round(18*g['scale']))
+            for j,lesson in enumerate(local_lessons):
+                lp=layer_paths[lesson['id']]
+                la=lesson['output_start']-start;lb=min(end,lesson['output_end'])-start
+                en_expr=f"gte(t,{max(0,la)})*lt(t,{lb})"
+                for idx_l,(lname,delay) in enumerate([('vi',0.0),('en',0.14),('chunks',0.28)]):
+                    if lname not in lp:continue
+                    args+=['-loop','1','-framerate','30','-i',lp[lname]]
+                    if la>=0:
+                        st=la+delay
+                        filters.append(f"[{next_input}:v]format=rgba,fade=t=in:st={st}:d=0.28:alpha=1[txt_{j}_{idx_l}]")
+                        filters.append(f"[{cur_page}][txt_{j}_{idx_l}]overlay=x=0:y='round({slide_px}*(1-min(1,max(0,(t-{st})/0.28))))':enable='{en_expr}'[pg_{j}_{idx_l}]")
+                    else:
+                        filters.append(f"[{cur_page}][{next_input}:v]overlay=0:0:enable='{en_expr}'[pg_{j}_{idx_l}]")
+                    cur_page=f'pg_{j}_{idx_l}';next_input+=1
+            page_labels.append(cur_page)
         args+=['-loop','1','-framerate','30','-i',mask_path]
         filters+=[f'[{next_input}:v]format=gray[mask]','[actor][mask]alphamerge[speaker]',f'[{page_labels[-1]}][speaker]overlay={sx}:{sy}:eof_action=pass[composed]']
         next_input+=1;current='composed'
@@ -129,7 +193,13 @@ def render_lessons(project,plan,transcript,context,preview=True):
             args+=['-loop','1','-framerate','30','-i',path]
             a=max(0,caption['output_start']-start);b=min(end,caption['output_end'])-start
             subx,suby=subtitle_position(w,h,tw,th,project['options'])
-            filters.append(f"[{current}][{next_input}:v]overlay={subx}:{suby}:enable='gte(t,{a})*lt(t,{b})'[sub{j}]")
+            if not animate:
+                filters.append(f"[{current}][{next_input}:v]overlay={subx}:{suby}:enable='gte(t,{a})*lt(t,{b})'[sub{j}]")
+            else:
+                sub_slide=max(4,round(8*g['scale']))
+                out_st=max(a,b-0.12)
+                filters.append(f"[{next_input}:v]format=rgba,fade=t=in:st={a}:d=0.15:alpha=1,fade=t=out:st={out_st}:d=0.12:alpha=1[subin{j}]")
+                filters.append(f"[{current}][subin{j}]overlay=x={subx}:y='{suby}+round({sub_slide}*(1-min(1,max(0,(t-{a})/0.15))))':enable='gte(t,{a})*lt(t,{b})'[sub{j}]")
             current=f'sub{j}';next_input+=1
         ffmpeg(['-filter_complex_threads','1',*args,'-filter_complex',';'.join(filters),'-map',f'[{current}]','-map','[audio]','-t',length,'-c:v','libx264','-preset','veryfast' if preview else 'fast','-crf','25' if preview else '20','-pix_fmt','yuv420p','-c:a','pcm_s16le','-ar','48000',chunk],context)
         atomic_json(cache/'complete.json',{'duration':length})
