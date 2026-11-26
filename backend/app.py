@@ -369,7 +369,7 @@ def audio_level(project_id:str):
     return preview_level(store.folder(project_id)/project['source_file'])
 
 @app.post('/api/projects/{project_id}/jobs/{kind}')
-def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker','recut','trim_edges']):
+def create_job(project_id:str,kind:Literal['pipeline','preview','export','prepare_speaker','recut','trim_edges','approve_publish']):
     idle(project_id)
     project=store.read(project_id)
     if kind!='pipeline' and not project.get('plan'):
