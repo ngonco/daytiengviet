@@ -100,6 +100,16 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             youtube.check_duplicate('h_old', '')
 
+    def test_parse_studio_dates_and_avoid_collision(self):
+        parsed = youtube.parse_studio_dates([
+            'Video A\nScheduled\nNov 26, 2026',
+            'Video B\nĐã lên lịch\n27 thg 11, 2026',
+            'Video C\n28/11/2026',
+        ])
+        self.assertEqual(parsed, {'2026-11-26', '2026-11-27', '2026-11-28'})
+        slot = youtube.next_available_slot(today=date(2026, 11, 26), extra_taken=parsed)
+        self.assertEqual(slot, '2026-11-29')
+
 
 if __name__ == '__main__':
     unittest.main()
