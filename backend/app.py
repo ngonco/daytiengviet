@@ -128,6 +128,10 @@ class AutomationConfig(BaseModel):
 class ApprovePublishBody(BaseModel):
     start_date: str | None=None
 
+class MarkScheduledBody(BaseModel):
+    scheduled_date: str | None=None
+    publish_hour: str | None=None
+
 class ProjectTitle(BaseModel):
     title: str=Field(min_length=1,max_length=120)
 
@@ -162,9 +166,31 @@ def approve_publish(project_id:str,body:ApprovePublishBody | None=None):
     source_hash=automation.digest(folder/project['source_file'])
     exp=project.get('export')
     export_hash=automation.digest(folder/exp['file']) if exp and (folder/exp['file']).is_file() else ''
-    youtube.check_duplicate(source_hash,export_hash)
+    video_title,_=youtube.build_youtube_metadata(project)
+    youtube.check_duplicate(source_hash,export_hash,title=video_title)
     req={'start_date':body.start_date} if body and body.start_date else {}
     return store.job_create(project_id,'approve_publish',req)
+
+@app.post('/api/projects/{project_id}/youtube/mark-scheduled')
+def youtube_mark_scheduled(project_id:str,body:MarkScheduledBody | None=None):
+    from datetime import date as _date
+    from . import automation, youtube
+    with store.LOCK:
+        project=store.read(project_id)
+        folder=store.folder(project_id)
+        source_hash=automation.digest(folder/project['source_file'])
+        exp=project.get('export')
+        export_hash=automation.digest(folder/exp['file']) if exp and (folder/exp['file']).is_file() else ''
+        video_title,_=youtube.build_youtube_metadata(project)
+        scheduled_date=(body.scheduled_date if body and body.scheduled_date else None) or youtube.next_available_slot()
+        _date.fromisoformat(scheduled_date)
+        publish_hour=(body.publish_hour if body and body.publish_hour else None) or automation.config().get('youtube_publish_hour','19:00')
+        youtube.check_duplicate(source_hash,export_hash,title=video_title)
+        record=youtube.record_upload(project['id'],source_hash,export_hash,scheduled_date,publish_hour,video_title,'scheduled','')
+        store.update(project['id'],youtube=record)
+        with store.connect() as conn:
+            conn.execute("UPDATE jobs SET status='succeeded', progress=100, message='Đã ghi nhận lịch đăng YouTube', error=NULL, updated=? WHERE project_id=? AND kind='approve_publish' AND status='failed'",(store.now(),project_id))
+    return project_read(project_id)
 
 @app.post('/api/automation/folder')
 def automation_folder():

@@ -157,11 +157,11 @@ def execute(job):
             automation.output_record(context.folder/result['file'])
         export_path=context.folder/result['file']
         export_hash=automation.digest(export_path)
-        youtube.check_duplicate(source_hash,export_hash)
         cfg=automation.config()
         publish_hour=cfg.get('youtube_publish_hour','19:00')
         scheduled_date=youtube.next_available_slot(request.get('start_date'))
         video_title,video_desc=youtube.build_youtube_metadata(project)
+        youtube.check_duplicate(source_hash,export_hash,title=video_title)
         uploaded=youtube.upload_and_schedule(export_path,video_title,video_desc,scheduled_date,publish_hour,context,start_date=request.get('start_date'))
         final_date=uploaded.get('scheduled_date') or scheduled_date
         record=youtube.record_upload(project['id'],source_hash,export_hash,final_date,publish_hour,video_title,'scheduled',uploaded.get('video_url',''))

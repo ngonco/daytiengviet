@@ -26,7 +26,7 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         self.mock.stop()
         self.tmp.cleanup()
 
-    def _make_project(self, pid, created_at, source_name='clip.mp4', freq=330):
+    def _make_project(self, pid, created_at, source_name='clip.mp4', freq=330, vi='Xin chào', en='Hello'):
         folder = store.folder(pid)
         (folder / 'assets').mkdir(exist_ok=True)
         Image.new('RGB', (400, 300), '#4a7c59').save(folder / 'assets/p.jpg')
@@ -36,15 +36,15 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
             '-t', '2', '-c:v', 'libx264', '-c:a', 'aac', folder / source_name,
         ])
         project = {
-            'id': pid, 'title': 'Chào hỏi', 'title_mode': 'auto',
+            'id': pid, 'title': vi, 'title_mode': 'auto',
             'source_file': source_name, 'original_name': source_name,
             'metadata': {'duration': 2.0, 'width': 320, 'height': 180},
             'options': {'ratio': '16:9', 'layout_mode': 'lesson', 'subtitles': 'bilingual', 'sfx': False, 'auto_volume': False},
             'status': 'ready', 'revision': 1, 'created_at': created_at,
             'plan': {
-                'schema_version': 2, 'summary': 'Chào hỏi', 'glossary': [], 'cuts': [], 'pauses': [], 'visuals': [],
-                'captions': [{'id': 'c1', 'start': 0, 'end': 2, 'vi': 'Xin chào', 'en': 'Hello'}],
-                'lessons': [{'id': 'l1', 'start': 0, 'end': 2, 'vi': 'Xin chào', 'en': 'Hello', 'chunks': [], 'asset_id': 'p'}],
+                'schema_version': 2, 'summary': vi, 'glossary': [], 'cuts': [], 'pauses': [], 'visuals': [],
+                'captions': [{'id': 'c1', 'start': 0, 'end': 2, 'vi': vi, 'en': en}],
+                'lessons': [{'id': 'l1', 'start': 0, 'end': 2, 'vi': vi, 'en': en, 'chunks': [], 'asset_id': 'p'}],
             },
             'transcript': {'captions': []},
             'assets': {'p': {'file': 'p.jpg'}}, 'frames': [], 'warnings': [],
@@ -57,8 +57,8 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         calls = []
         youtube.UPLOAD_HOOK = lambda **kw: calls.append(kw) or {'video_url': f'https://youtu.be/test{len(calls)}'}
         automation.configure(youtube_publish_hour='19:00')
-        p1 = self._make_project('aaaaaaaaaaaaaaaa', datetime.now(timezone.utc).isoformat(), 'a.mp4', 330)
-        p2 = self._make_project('bbbbbbbbbbbbbbbb', datetime.now(timezone.utc).isoformat(), 'b.mp4', 440)
+        p1 = self._make_project('aaaaaaaaaaaaaaaa', datetime.now(timezone.utc).isoformat(), 'a.mp4', 330, 'Xin chào', 'Hello')
+        p2 = self._make_project('bbbbbbbbbbbbbbbb', datetime.now(timezone.utc).isoformat(), 'b.mp4', 440, 'Tạm biệt', 'Goodbye')
 
         j1 = store.job_create(p1['id'], 'approve_publish', {})
         worker.execute(j1)
@@ -129,6 +129,18 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         self.assertIn('Cho tôi nước lọc — I would like water', desc)
         self.assertIn('Cho tôi: I would like', desc)
         self.assertIn('#learnvietnamese', desc)
+
+    def test_manual_mark_scheduled_and_title_duplicate_protection(self):
+        from backend.app import youtube_mark_scheduled, MarkScheduledBody
+        p = self._make_project('dddddddddddddddd', datetime.now(timezone.utc).isoformat(), 'd.mp4', 550, 'Tính tiền', 'Could I have the bill')
+        job = store.job_create(p['id'], 'approve_publish', {})
+        store.job_update(job['id'], status='failed', error='Timeout')
+        updated = youtube_mark_scheduled(p['id'], MarkScheduledBody(scheduled_date='2026-11-28', publish_hour='19:00'))
+        self.assertEqual(updated['youtube']['scheduled_date'], '2026-11-28')
+        self.assertEqual(store.job_read(job['id'])['status'], 'succeeded')
+        # Even a different file with the same lesson title is blocked as duplicate.
+        with self.assertRaises(ValueError):
+            youtube.check_duplicate('brand_new_hash', '', title='Learn vietnamese: Could I have the bill #learnvietnamese')
 
 
 if __name__ == '__main__':
