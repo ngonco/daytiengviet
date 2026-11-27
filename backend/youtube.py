@@ -183,6 +183,16 @@ def record_upload(project_id, source_hash, export_hash, scheduled_date, publish_
     }
 
 
+def clear_project_upload(project_id):
+    with store.connect() as conn:
+        conn.execute('DELETE FROM youtube_uploads WHERE project_id=?', (project_id,))
+    project = store.read(project_id)
+    if 'youtube' in project:
+        project.pop('youtube', None)
+        store.save(project)
+    return project
+
+
 def _launch_persistent(playwright, headless=False):
     user_dir = str(profile_dir())
     for channel in ('msedge', 'chrome', None):
@@ -212,28 +222,91 @@ def open_login_session():
     return {'ok': True, 'message': 'Đã mở cửa sổ YouTube Studio. Hãy đăng nhập kênh của bạn rồi đóng cửa sổ trình duyệt.'}
 
 
-def _read_studio_state(page):
+def _format_studio_date(iso_date):
+    d = date.fromisoformat(iso_date)
+    months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    return f'{months[d.month - 1]} {d.day}, {d.year}'
+
+
+def _format_studio_time(hhmm, sample=''):
+    hh, mm = [int(x) for x in str(hhmm or '19:00').split(':')[:2]]
+    if re.search(r'\b(AM|PM)\b', str(sample or ''), re.I):
+        ampm = 'PM' if hh >= 12 else 'AM'
+        h12 = hh % 12 or 12
+        return f'{h12}:{mm:02d} {ampm}'
+    return f'{hh:02d}:{mm:02d}'
+
+
+def _read_studio_state(page, include_tabs=True):
     scheduled_dates = set()
     titles = set()
-    try:
-        rows = page.locator('ytcp-video-row').all_inner_texts()
-        scheduled_texts = [t for t in rows if re.search(r'Scheduled|Đã lên lịch|Lên lịch', t, re.I)]
-        scheduled_dates = parse_studio_dates(scheduled_texts)
-        for t in rows:
-            first_line = t.splitlines()[0] if t else ''
-            norm = _strip_tags(first_line)
-            if norm:
-                titles.add(norm)
-        for el in page.locator('ytcp-video-row #video-title, ytcp-video-row a#video-title').all():
-            try:
-                norm = _strip_tags(el.inner_text())
-                if norm:
+    row_entries = []
+    today_iso = datetime.now().date().isoformat()
+
+    def scan_current():
+        try:
+            rows = page.locator('ytcp-video-row').all_inner_texts()
+            for t in rows:
+                is_draft = bool(re.search(r'\bDraft\b|Bản nháp', t, re.I))
+                is_scheduled = bool(re.search(r'\bScheduled\b|Đã lên lịch|Lên lịch', t, re.I))
+                is_published = bool(re.search(r'\bPublished\b|\bPublic\b|Công khai', t, re.I))
+                row_dates = parse_studio_dates([t])
+                if is_scheduled:
+                    scheduled_dates.update(row_dates)
+                elif is_published and today_iso in row_dates:
+                    scheduled_dates.add(today_iso)
+                lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+                row_title = ''
+                for ln in lines:
+                    if re.match(r'^\d+:\d+$', ln):
+                        continue
+                    row_title = ln
+                    break
+                norm = _strip_tags(row_title)
+                row_entries.append({'text': t, 'title': norm, 'draft': is_draft, 'scheduled': is_scheduled, 'dates': row_dates})
+                if norm and not is_draft and norm != 'final':
                     titles.add(norm)
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return scheduled_dates, titles
+        except Exception:
+            pass
+
+    if not include_tabs:
+        scan_current()
+        return scheduled_dates, titles, row_entries
+
+    visited = False
+    for tab_sel in (
+        'tp-yt-paper-tab:has-text("Videos")',
+        'tp-yt-paper-tab:has-text("Shorts")',
+        'tp-yt-paper-tab:has-text("Video ngắn")',
+    ):
+        try:
+            loc = page.locator(tab_sel).first
+            if loc.count() and loc.is_visible():
+                loc.click()
+                page.wait_for_timeout(1500)
+                scan_current()
+                visited = True
+        except Exception:
+            continue
+    if not visited:
+        scan_current()
+    return scheduled_dates, titles, row_entries
+
+
+def _fill_editable(page, locator, text):
+    locator.wait_for(state='visible', timeout=45_000)
+    for _ in range(3):
+        locator.click()
+        page.wait_for_timeout(150)
+        page.keyboard.press('Control+A')
+        page.keyboard.press('Backspace')
+        locator.fill(text)
+        page.wait_for_timeout(300)
+        current = re.sub(r'\s+', ' ', locator.inner_text() or '').strip()
+        want = re.sub(r'\s+', ' ', text).strip()
+        if current == want or (want and want[:20] in current):
+            return True
+    return False
 
 
 def _advance_to_visibility(page):
@@ -248,16 +321,15 @@ def _advance_to_visibility(page):
         try:
             next_btn.wait_for(state='visible', timeout=8000)
             if next_btn.is_disabled():
-                page.wait_for_timeout(600)
+                page.wait_for_timeout(800)
             next_btn.click()
-            page.wait_for_timeout(700)
+            page.wait_for_timeout(800)
         except Exception:
             break
     return False
 
 
 def _fill_schedule_fields(page, scheduled_date, publish_hour):
-    # Scroll upload dialog body to the bottom so Schedule controls are in view without hanging.
     try:
         page.evaluate("""() => {
             for (const sel of ['ytcp-uploads-dialog #scrollable-content', 'ytcp-uploads-dialog tp-yt-iron-pages', 'ytcp-video-visibility-select']) {
@@ -269,44 +341,52 @@ def _fill_schedule_fields(page, scheduled_date, publish_hour):
     except Exception:
         pass
 
-    for selector in (
-        '#second-container-expand-button',
-        '#schedule-radio-button',
-        'tp-yt-paper-radio-button[name="SCHEDULE"]',
-        '[name="SCHEDULE"]',
-        'ytcp-video-visibility-select tp-yt-paper-radio-button:has-text("Schedule")',
-        'ytcp-video-visibility-select tp-yt-paper-radio-button:has-text("Lên lịch")',
-    ):
-        try:
-            loc = page.locator(selector).first
-            if loc.count():
-                loc.scroll_into_view_if_needed(timeout=2500)
-                if loc.is_visible():
-                    loc.click(timeout=2500)
-                    page.wait_for_timeout(350)
-                    if selector != '#second-container-expand-button':
+    # Click Schedule expand button if datepicker is not visible yet.
+    date_trigger = page.locator('#datepicker-trigger').first
+    if not (date_trigger.count() and date_trigger.is_visible()):
+        for selector in (
+            '#second-container-expand-button',
+            '#schedule-radio-button',
+            'tp-yt-paper-radio-button[name="SCHEDULE"]',
+        ):
+            try:
+                loc = page.locator(selector).first
+                if loc.count() and loc.is_visible():
+                    loc.click(timeout=3000)
+                    page.wait_for_timeout(500)
+                    if date_trigger.count() and date_trigger.is_visible():
                         break
-        except Exception:
-            continue
+            except Exception:
+                continue
 
+    # Set date via #datepicker-trigger popup -> ytcp-date-picker input.
     try:
-        date_input = page.locator('#datepicker-trigger input, ytcp-date-picker input').first
-        if date_input.count() and date_input.is_visible():
-            date_input.click(timeout=2500)
+        if date_trigger.count() and date_trigger.is_visible():
+            date_trigger.click(timeout=3000)
+            page.wait_for_timeout(400)
+            dp_input = page.locator('ytcp-date-picker input').first
+            dp_input.wait_for(state='visible', timeout=4000)
+            existing = dp_input.input_value()
+            date_str = scheduled_date if re.match(r'^\d{4}-\d{2}-\d{2}$', existing.strip()) else _format_studio_date(scheduled_date)
+            dp_input.click()
             page.keyboard.press('Control+A')
-            date_input.fill(scheduled_date)
+            dp_input.fill(date_str)
             page.keyboard.press('Enter')
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(400)
     except Exception:
         pass
 
+    # Set time via #time-of-day-container input.
     try:
         time_input = page.locator('#time-of-day-container input, ytcp-form-input-container input[aria-label*="time" i], ytcp-form-input-container input[aria-label*="giờ" i]').first
         if time_input.count() and time_input.is_visible():
-            time_input.click(timeout=2500)
+            existing_time = time_input.input_value()
+            time_str = _format_studio_time(publish_hour, existing_time)
+            time_input.click(timeout=3000)
             page.keyboard.press('Control+A')
-            time_input.fill(publish_hour)
+            time_input.fill(time_str)
             page.keyboard.press('Enter')
+            page.wait_for_timeout(300)
     except Exception:
         pass
 
@@ -334,11 +414,8 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
                 content_nav = page.locator('#menu-item-1, a[href*="/videos"]').first
                 if content_nav.count():
                     content_nav.click()
-                    try:
-                        page.locator('ytcp-video-row').first.wait_for(state='visible', timeout=5000)
-                    except Exception:
-                        page.wait_for_timeout(1500)
-                studio_taken, studio_titles = _read_studio_state(page)
+                    page.wait_for_timeout(1500)
+                studio_taken, studio_titles, _ = _read_studio_state(page, include_tabs=True)
             except Exception:
                 pass
 
@@ -354,30 +431,32 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
             file_input.set_input_files(str(Path(mp4_path).resolve()))
             if context:
                 context.progress(90, f'Đang tải video và điền lịch {scheduled_date} {publish_hour} trên YouTube Studio')
-            title_box = page.locator('#textbox[aria-label*="title" i], #textbox[aria-label*="tiêu đề" i], ytcp-social-suggestions-textbox #textbox').first
+
+            title_box = page.locator('ytcp-video-title #textbox').first
             title_box.wait_for(state='visible', timeout=45_000)
-            title_box.click()
-            page.keyboard.press('Control+A')
-            title_box.fill(title[:100])
-            desc_boxes = page.locator('ytcp-social-suggestions-textbox #textbox')
-            if desc_boxes.count() > 1:
-                desc_boxes.nth(1).click()
-                desc_boxes.nth(1).fill(description[:5000])
+            # Wait for YouTube Studio to hydrate initial filename ("final") and upload defaults before overwriting.
+            page.wait_for_timeout(2000)
+            _fill_editable(page, title_box, title[:100])
+            desc_box = page.locator('ytcp-video-description #textbox').first
+            if desc_box.count():
+                _fill_editable(page, desc_box, description[:5000])
             not_kids = page.locator('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]').first
             if not_kids.count():
                 not_kids.click()
+            # Re-verify title did not get reset by late hydration.
+            _fill_editable(page, title_box, title[:100])
 
             _advance_to_visibility(page)
             _fill_schedule_fields(page, scheduled_date, publish_hour)
 
             # Never auto-click #done-button: let the user inspect and click Schedule themselves.
             if context:
-                context.progress(95, f'Đã điền lịch {scheduled_date} {publish_hour}. Hãy kiểm tra và tự bấm nút Lên lịch (Schedule) trên YouTube Studio.')
+                context.progress(95, f'Đã điền Tiêu đề, Mô tả và lịch {scheduled_date} {publish_hour}. Hãy kiểm tra và tự bấm nút Lên lịch (Schedule) trên YouTube Studio.')
             closed = False
             confirmed = False
             video_url = ''
             final_date = scheduled_date
-            saw_done = False
+            saw_dialog = False
             for _ in range(600):
                 if context:
                     context.check()
@@ -385,12 +464,9 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
                     closed = True
                     break
                 try:
-                    done_btn = page.locator('#done-button').first
-                    if done_btn.count() and done_btn.is_visible():
-                        saw_done = True
-                    elif saw_done:
-                        # Upload dialog completed or transitioned after user clicked Schedule.
-                        confirmed = True
+                    upload_dialog = page.locator('ytcp-uploads-dialog').first
+                    if upload_dialog.count() and upload_dialog.is_visible():
+                        saw_dialog = True
                     share_dialog = page.locator('ytcp-video-share-dialog, #share-url').first
                     if share_dialog.count() and share_dialog.is_visible():
                         confirmed = True
@@ -404,28 +480,26 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
                         if link.count():
                             video_url = link.get_attribute('href') or ''
                         break
-                    upload_dialog = page.locator('ytcp-uploads-dialog').first
-                    if saw_done and (not upload_dialog.count() or not upload_dialog.is_visible()):
-                        confirmed = True
+                    if saw_dialog and (not upload_dialog.count() or not upload_dialog.is_visible()):
+                        # Dialog closed: verify in Content list that video is genuinely Scheduled, NOT Draft.
+                        page.wait_for_timeout(1500)
+                        _, _, rows = _read_studio_state(page, include_tabs=True)
+                        want = _strip_tags(title)
+                        matched = [r for r in rows if want and want in r['title']]
+                        if matched and any(r['scheduled'] for r in matched):
+                            confirmed = True
+                            sched = next(r for r in matched if r['scheduled'])
+                            if sched['dates']:
+                                final_date = sorted(sched['dates'])[0]
+                        else:
+                            raise Cancelled('Video mới chỉ được lưu ở trạng thái Nháp (Draft), chưa bấm Lên lịch.')
                         break
+                except Cancelled:
+                    raise
                 except Exception:
                     pass
                 page.wait_for_timeout(1000)
             if confirmed:
-                # Try reading back the exact scheduled date from Content rows if share dialog didn't show it.
-                try:
-                    page.wait_for_timeout(1200)
-                    _, _ = _read_studio_state(page)
-                    rows = page.locator('ytcp-video-row').all_inner_texts()
-                    want = _strip_tags(title)
-                    for row_txt in rows:
-                        if want and want in _strip_tags(row_txt):
-                            dates = parse_studio_dates([row_txt])
-                            if dates:
-                                final_date = sorted(dates)[0]
-                            break
-                except Exception:
-                    pass
                 return {'video_url': video_url, 'scheduled_date': final_date}
             if closed:
                 raise Cancelled('Bạn đã đóng YouTube Studio trước khi bấm Lên lịch.')

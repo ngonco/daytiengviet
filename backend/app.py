@@ -192,6 +192,14 @@ def youtube_mark_scheduled(project_id:str,body:MarkScheduledBody | None=None):
             conn.execute("UPDATE jobs SET status='succeeded', progress=100, message='Đã ghi nhận lịch đăng YouTube', error=NULL, updated=? WHERE project_id=? AND kind='approve_publish' AND status='failed'",(store.now(),project_id))
     return project_read(project_id)
 
+@app.delete('/api/projects/{project_id}/youtube')
+def youtube_clear_status(project_id:str):
+    from . import youtube
+    with store.LOCK:
+        idle(project_id)
+        youtube.clear_project_upload(project_id)
+    return project_read(project_id)
+
 @app.post('/api/automation/folder')
 def automation_folder():
     from .automation import native_folder

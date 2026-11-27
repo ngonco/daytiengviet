@@ -142,6 +142,18 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             youtube.check_duplicate('brand_new_hash', '', title='Learn vietnamese: Could I have the bill #learnvietnamese')
 
+    def test_studio_date_and_time_formatting_and_clear_status(self):
+        self.assertEqual(youtube._format_studio_date('2026-11-29'), 'Nov 29, 2026')
+        self.assertEqual(youtube._format_studio_time('19:00', '12:00 AM'), '7:00 PM')
+        self.assertEqual(youtube._format_studio_time('09:05', '12:00 PM'), '9:05 AM')
+        self.assertEqual(youtube._format_studio_time('19:00', '19:00'), '19:00')
+        p = self._make_project('eeeeeeeeeeeeeeee', datetime.now(timezone.utc).isoformat(), 'e.mp4', 660, 'Cảm ơn', 'Thank you')
+        rec = youtube.record_upload(p['id'], 'h_e', 'exp_e', '2026-11-29', '19:00', 'Learn vietnamese: Thank you')
+        store.update(p['id'], youtube=rec)
+        cleared = youtube.clear_project_upload(p['id'])
+        self.assertNotIn('youtube', cleared)
+        self.assertEqual(youtube.list_uploads(), [])
+
 
 if __name__ == '__main__':
     unittest.main()
