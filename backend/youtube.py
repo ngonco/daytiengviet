@@ -1,11 +1,16 @@
-"""YouTube Studio browser automation, 1/day scheduling, and permanent duplicate memory."""
+"""YouTube Studio Camoufox browser automation, human-like interaction, 1/day scheduling, and duplicate memory."""
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+import json
 from pathlib import Path
+import random
 import re
 import threading
+import time
 from . import store
 
 UPLOAD_HOOK = None
+_BROWSER_LOCK = threading.Lock()
 _MONTHS = {
     'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
@@ -96,9 +101,90 @@ def build_youtube_metadata(project):
 
 
 def profile_dir():
-    path = store.data_root().resolve() / 'runtime' / 'youtube-profile'
+    path = store.data_root().resolve() / 'runtime' / 'youtube-camoufox-profile'
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _fingerprint_path():
+    return profile_dir() / 'camoufox-fingerprint.json'
+
+
+def _load_or_create_fingerprint_preset():
+    fp_file = _fingerprint_path()
+    if fp_file.is_file():
+        try:
+            saved = json.loads(fp_file.read_text(encoding='utf-8'))
+            if isinstance(saved, dict) and saved:
+                return saved
+        except Exception:
+            pass
+    from camoufox.fingerprints import get_random_preset, load_presets
+    from camoufox.pkgman import installed_verstr
+
+    try:
+        ff_ver = installed_verstr().split('.', 1)[0]
+    except Exception:
+        ff_ver = None
+    preset = None
+    try:
+        all_presets = load_presets(ff_ver) or {}
+        win_presets = (all_presets.get('presets') or {}).get('windows') or []
+        desktop = [
+            p for p in win_presets
+            if isinstance(p, dict)
+            and 1280 <= ((p.get('screen') or {}).get('width') or 0) <= 1920
+            and 720 <= ((p.get('screen') or {}).get('height') or 0) <= 1080
+        ]
+        if desktop:
+            preset = random.choice(desktop)
+    except Exception:
+        preset = None
+    if preset is None:
+        preset = get_random_preset(os='windows', ff_version=ff_ver)
+    if isinstance(preset, dict) and preset:
+        store.atomic_json(fp_file, preset)
+        return preset
+    return None
+
+
+def _ensure_camoufox_ready():
+    try:
+        from camoufox import pkgman
+        from camoufox.sync_api import Camoufox  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError('Chưa cài thư viện Camoufox. Hãy chạy `pip install camoufox` trước khi đăng YouTube.') from exc
+    try:
+        exe = pkgman.camoufox_path(download_if_missing=False)
+    except Exception as exc:
+        raise RuntimeError('Chưa tải trình duyệt Camoufox. Hãy chạy `python -m camoufox fetch` để cài đặt Camoufox trước khi đăng YouTube.') from exc
+    if not exe or not Path(exe).exists():
+        raise RuntimeError('Không tìm thấy file chạy Camoufox. Hãy chạy `python -m camoufox fetch` để cài đặt Camoufox.')
+    return exe
+
+
+@contextmanager
+def _launch_persistent(headless=False):
+    _ensure_camoufox_ready()
+    from camoufox.sync_api import Camoufox
+
+    preset = _load_or_create_fingerprint_preset()
+    kwargs = {
+        'persistent_context': True,
+        'user_data_dir': str(profile_dir()),
+        'os': 'windows',
+        'humanize': 1.2,
+        'locale': ['en-US', 'vi-VN'],
+        'enable_cache': True,
+        'headless': headless,
+    }
+    if preset:
+        kwargs['fingerprint_preset'] = preset
+    try:
+        with Camoufox(**kwargs) as ctx:
+            yield ctx
+    except Exception as exc:
+        raise RuntimeError(f'Không mở được trình duyệt Camoufox cho YouTube Studio: {exc}') from exc
 
 
 def list_uploads(limit=200):
@@ -193,33 +279,29 @@ def clear_project_upload(project_id):
     return project
 
 
-def _launch_persistent(playwright, headless=False):
-    user_dir = str(profile_dir())
-    for channel in ('msedge', 'chrome', None):
-        try:
-            kwargs = {'user_data_dir': user_dir, 'headless': headless, 'args': ['--disable-blink-features=AutomationControlled']}
-            if channel:
-                kwargs['channel'] = channel
-            return playwright.chromium.launch_persistent_context(**kwargs)
-        except Exception:
-            continue
-    raise RuntimeError('Không mở được trình duyệt Chrome/Edge/Chromium để đăng nhập YouTube Studio.')
-
-
 def open_login_session():
+    """Launch Camoufox persistent profile so the user can sign into YouTube Studio once."""
+    try:
+        _ensure_camoufox_ready()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    if not _BROWSER_LOCK.acquire(blocking=False):
+        raise ValueError('Trình duyệt Camoufox YouTube Studio đang mở. Hãy đóng cửa sổ hiện tại trước khi mở lại.')
+
     def run():
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            ctx = _launch_persistent(p, headless=False)
-            page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            page.goto('https://studio.youtube.com', wait_until='domcontentloaded')
-            try:
-                page.wait_for_event('close', timeout=300_000)
-            except Exception:
-                pass
-            ctx.close()
+        try:
+            with _launch_persistent(headless=False) as ctx:
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                page.goto('https://studio.youtube.com', wait_until='domcontentloaded', timeout=45_000)
+                try:
+                    page.wait_for_event('close', timeout=300_000)
+                except Exception:
+                    pass
+        finally:
+            _BROWSER_LOCK.release()
+
     threading.Thread(target=run, name='vietcut-yt-login', daemon=True).start()
-    return {'ok': True, 'message': 'Đã mở cửa sổ YouTube Studio. Hãy đăng nhập kênh của bạn rồi đóng cửa sổ trình duyệt.'}
+    return {'ok': True, 'message': 'Đã mở cửa sổ Camoufox YouTube Studio. Hãy đăng nhập kênh của bạn rồi đóng cửa sổ trình duyệt.'}
 
 
 def _format_studio_date(iso_date):
@@ -237,7 +319,106 @@ def _format_studio_time(hhmm, sample=''):
     return f'{hh:02d}:{mm:02d}'
 
 
-def _read_studio_state(page, include_tabs=True):
+def _human_wait(page, min_ms=450, max_ms=1200, context=None):
+    """Wait a randomized human-like duration while staying responsive to job cancellation."""
+    remaining = max(0, int(random.uniform(min_ms, max_ms)))
+    while remaining > 0:
+        if context:
+            context.check()
+        step = min(250, remaining)
+        page.wait_for_timeout(step)
+        remaining -= step
+
+
+def _human_idle_drift(page, context=None):
+    """Move the pointer casually inside a safe viewport area after navigation."""
+    try:
+        vp = page.viewport_size or {'width': 1280, 'height': 720}
+        x = random.randint(int(vp['width'] * 0.25), int(vp['width'] * 0.72))
+        y = random.randint(int(vp['height'] * 0.2), int(vp['height'] * 0.65))
+        page.mouse.move(x, y, steps=random.randint(8, 18))
+        _human_wait(page, 180, 450, context)
+    except Exception:
+        pass
+
+
+def _human_move_and_click(page, locator, timeout=15_000, context=None):
+    """Scroll into view, hover naturally (Camoufox humanized cursor), pause, and click."""
+    locator.wait_for(state='visible', timeout=timeout)
+    try:
+        locator.scroll_into_view_if_needed(timeout=timeout)
+    except Exception:
+        pass
+    _human_wait(page, 140, 340, context)
+    try:
+        locator.hover(timeout=timeout)
+    except Exception:
+        pass
+    _human_wait(page, 110, 280, context)
+    locator.click(delay=random.randint(45, 130), timeout=timeout)
+
+
+def _human_scroll(page, container_selectors, context=None):
+    """Scroll dialog content with mouse-wheel increments instead of instant JS scrollTop jumps."""
+    scrolled = False
+    for sel in container_selectors:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() and loc.is_visible():
+                box = loc.bounding_box()
+                if box and box['width'] > 20 and box['height'] > 20:
+                    cx = box['x'] + box['width'] * random.uniform(0.35, 0.65)
+                    cy = box['y'] + box['height'] * random.uniform(0.35, 0.65)
+                    page.mouse.move(cx, cy, steps=random.randint(6, 12))
+                    for _ in range(random.randint(3, 5)):
+                        page.mouse.wheel(0, random.randint(180, 320))
+                        _human_wait(page, 130, 290, context)
+                    scrolled = True
+                    break
+        except Exception:
+            continue
+    if not scrolled:
+        try:
+            for _ in range(3):
+                page.mouse.wheel(0, random.randint(200, 340))
+                _human_wait(page, 130, 260, context)
+        except Exception:
+            pass
+
+
+def _human_type_text(page, text, context=None):
+    """Type text character-by-character with natural variable keystroke cadence."""
+    for idx, ch in enumerate(text):
+        if context and idx % 10 == 0:
+            context.check()
+        if ch == '\n':
+            page.keyboard.press('Enter')
+            _human_wait(page, 120, 280, context)
+            continue
+        delay = random.randint(35, 92)
+        page.keyboard.type(ch, delay=delay)
+        if ch in (' ', ',', '.', '—', ':'):
+            _human_wait(page, 40, 125, context)
+
+
+def _human_type_input(page, locator, value, context=None):
+    """Clear and type a short single-line input field like date or time."""
+    _human_move_and_click(page, locator, timeout=8000, context=context)
+    _human_wait(page, 120, 260, context)
+    page.keyboard.press('Control+a')
+    _human_wait(page, 90, 200, context)
+    page.keyboard.press('Backspace')
+    _human_wait(page, 140, 300, context)
+    _human_type_text(page, value, context)
+    _human_wait(page, 180, 360, context)
+    page.keyboard.press('Enter')
+
+
+def _read_editable(locator):
+    return re.sub(r'\s+', ' ', locator.inner_text() or '').strip()
+
+
+def _read_studio_state(page, include_tabs=True, context=None):
     scheduled_dates = set()
     titles = set()
     row_entries = []
@@ -282,8 +463,8 @@ def _read_studio_state(page, include_tabs=True):
         try:
             loc = page.locator(tab_sel).first
             if loc.count() and loc.is_visible():
-                loc.click()
-                page.wait_for_timeout(1500)
+                _human_move_and_click(page, loc, timeout=8000, context=context)
+                _human_wait(page, 1300, 2200, context)
                 scan_current()
                 visited = True
         except Exception:
@@ -293,23 +474,43 @@ def _read_studio_state(page, include_tabs=True):
     return scheduled_dates, titles, row_entries
 
 
-def _fill_editable(page, locator, text):
+def _fill_editable(page, locator, text, context=None, chunked=False):
+    """Focus a YouTube Studio contenteditable box and enter text with human-like pacing."""
     locator.wait_for(state='visible', timeout=45_000)
+    want = re.sub(r'\s+', ' ', text).strip()
+    if want and _read_editable(locator) == want:
+        return True
     for _ in range(3):
-        locator.click()
-        page.wait_for_timeout(150)
-        page.keyboard.press('Control+A')
+        _human_move_and_click(page, locator, timeout=15_000, context=context)
+        _human_wait(page, 140, 300, context)
+        page.keyboard.press('Control+a')
+        _human_wait(page, 100, 220, context)
         page.keyboard.press('Backspace')
-        locator.fill(text)
-        page.wait_for_timeout(300)
-        current = re.sub(r'\s+', ' ', locator.inner_text() or '').strip()
-        want = re.sub(r'\s+', ' ', text).strip()
+        _human_wait(page, 200, 420, context)
+        if not chunked or len(text) <= 140:
+            _human_type_text(page, text, context)
+        else:
+            lines = text.splitlines()
+            for i, line in enumerate(lines):
+                if context:
+                    context.check()
+                is_last_tags = i == len(lines) - 1 and line.strip().startswith('#')
+                if is_last_tags:
+                    _human_type_text(page, line, context)
+                elif line:
+                    page.keyboard.insert_text(line)
+                if i < len(lines) - 1:
+                    _human_wait(page, 110, 260, context)
+                    page.keyboard.press('Enter')
+                    _human_wait(page, 120, 280, context)
+        _human_wait(page, 350, 750, context)
+        current = _read_editable(locator)
         if current == want or (want and want[:20] in current):
             return True
     return False
 
 
-def _advance_to_visibility(page):
+def _advance_to_visibility(page, context=None):
     for _ in range(5):
         vis = page.locator('ytcp-video-visibility-select, #done-button').first
         try:
@@ -321,25 +522,21 @@ def _advance_to_visibility(page):
         try:
             next_btn.wait_for(state='visible', timeout=8000)
             if next_btn.is_disabled():
-                page.wait_for_timeout(800)
-            next_btn.click()
-            page.wait_for_timeout(800)
+                _human_wait(page, 700, 1200, context)
+            _human_move_and_click(page, next_btn, timeout=8000, context=context)
+            _human_wait(page, 900, 1750, context)
         except Exception:
             break
     return False
 
 
-def _fill_schedule_fields(page, scheduled_date, publish_hour):
-    try:
-        page.evaluate("""() => {
-            for (const sel of ['ytcp-uploads-dialog #scrollable-content', 'ytcp-uploads-dialog tp-yt-iron-pages', 'ytcp-video-visibility-select']) {
-                const el = document.querySelector(sel);
-                if (el) el.scrollTop = el.scrollHeight;
-            }
-        }""")
-        page.wait_for_timeout(300)
-    except Exception:
-        pass
+def _fill_schedule_fields(page, scheduled_date, publish_hour, context=None):
+    _human_scroll(
+        page,
+        ['ytcp-uploads-dialog #scrollable-content', 'ytcp-uploads-dialog tp-yt-iron-pages', 'ytcp-video-visibility-select'],
+        context=context,
+    )
+    _human_wait(page, 300, 650, context)
 
     # Click Schedule expand button if datepicker is not visible yet.
     date_trigger = page.locator('#datepicker-trigger').first
@@ -352,8 +549,8 @@ def _fill_schedule_fields(page, scheduled_date, publish_hour):
             try:
                 loc = page.locator(selector).first
                 if loc.count() and loc.is_visible():
-                    loc.click(timeout=3000)
-                    page.wait_for_timeout(500)
+                    _human_move_and_click(page, loc, timeout=5000, context=context)
+                    _human_wait(page, 500, 950, context)
                     if date_trigger.count() and date_trigger.is_visible():
                         break
             except Exception:
@@ -362,17 +559,14 @@ def _fill_schedule_fields(page, scheduled_date, publish_hour):
     # Set date via #datepicker-trigger popup -> ytcp-date-picker input.
     try:
         if date_trigger.count() and date_trigger.is_visible():
-            date_trigger.click(timeout=3000)
-            page.wait_for_timeout(400)
+            _human_move_and_click(page, date_trigger, timeout=5000, context=context)
+            _human_wait(page, 400, 800, context)
             dp_input = page.locator('ytcp-date-picker input').first
             dp_input.wait_for(state='visible', timeout=4000)
             existing = dp_input.input_value()
             date_str = scheduled_date if re.match(r'^\d{4}-\d{2}-\d{2}$', existing.strip()) else _format_studio_date(scheduled_date)
-            dp_input.click()
-            page.keyboard.press('Control+A')
-            dp_input.fill(date_str)
-            page.keyboard.press('Enter')
-            page.wait_for_timeout(400)
+            _human_type_input(page, dp_input, date_str, context=context)
+            _human_wait(page, 400, 800, context)
     except Exception:
         pass
 
@@ -382,11 +576,8 @@ def _fill_schedule_fields(page, scheduled_date, publish_hour):
         if time_input.count() and time_input.is_visible():
             existing_time = time_input.input_value()
             time_str = _format_studio_time(publish_hour, existing_time)
-            time_input.click(timeout=3000)
-            page.keyboard.press('Control+A')
-            time_input.fill(time_str)
-            page.keyboard.press('Enter')
-            page.wait_for_timeout(300)
+            _human_type_input(page, time_input, time_str, context=context)
+            _human_wait(page, 350, 700, context)
     except Exception:
         pass
 
@@ -394,15 +585,20 @@ def _fill_schedule_fields(page, scheduled_date, publish_hour):
 def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_hour='19:00', context=None, start_date=None):
     if UPLOAD_HOOK is not None:
         return UPLOAD_HOOK(mp4_path=mp4_path, title=title, description=description, scheduled_date=scheduled_date, publish_hour=publish_hour, context=context)
-    from playwright.sync_api import sync_playwright
     from .media import Cancelled
+
+    _ensure_camoufox_ready()
+    if not _BROWSER_LOCK.acquire(blocking=False):
+        raise RuntimeError('Trình duyệt Camoufox YouTube Studio đang mở. Hãy đóng cửa sổ đang mở rồi thử lại.')
+
     if context:
-        context.progress(85, 'Đang mở YouTube Studio kiểm tra lịch và video trùng...')
-    with sync_playwright() as p:
-        browser = _launch_persistent(p, headless=False)
-        try:
+        context.progress(85, 'Đang mở Camoufox YouTube Studio kiểm tra lịch và video trùng...')
+    try:
+        with _launch_persistent(headless=False) as browser:
             page = browser.pages[0] if browser.pages else browser.new_page()
             page.goto('https://studio.youtube.com', wait_until='domcontentloaded', timeout=45_000)
+            _human_wait(page, 1300, 2400, context)
+            _human_idle_drift(page, context)
             if 'accounts.google.com' in page.url:
                 raise RuntimeError('Chưa đăng nhập YouTube Studio. Hãy bấm "Đăng nhập YouTube Studio" trước.')
             create_btn = page.locator('#create-icon, ytcp-button#create-icon, [aria-label*="Create" i], [aria-label*="Tạo" i]').first
@@ -412,10 +608,10 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
             studio_titles = set()
             try:
                 content_nav = page.locator('#menu-item-1, a[href*="/videos"]').first
-                if content_nav.count():
-                    content_nav.click()
-                    page.wait_for_timeout(1500)
-                studio_taken, studio_titles, _ = _read_studio_state(page, include_tabs=True)
+                if content_nav.count() and content_nav.is_visible():
+                    _human_move_and_click(page, content_nav, timeout=10_000, context=context)
+                    _human_wait(page, 1400, 2400, context)
+                studio_taken, studio_titles, _ = _read_studio_state(page, include_tabs=True, context=context)
             except Exception:
                 pass
 
@@ -424,30 +620,45 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
 
             scheduled_date = next_available_slot(start_date, extra_taken=studio_taken)
 
-            create_btn.click()
+            _human_move_and_click(page, create_btn, timeout=15_000, context=context)
+            _human_wait(page, 450, 950, context)
             upload_item = page.locator('#text-item-0, tp-yt-paper-item:has-text("Upload"), tp-yt-paper-item:has-text("Tải video")').first
-            upload_item.click()
+            _human_move_and_click(page, upload_item, timeout=15_000, context=context)
+            _human_wait(page, 500, 1000, context)
             file_input = page.locator('input[type="file"]').first
             file_input.set_input_files(str(Path(mp4_path).resolve()))
             if context:
-                context.progress(90, f'Đang tải video và điền lịch {scheduled_date} {publish_hour} trên YouTube Studio')
+                context.progress(90, f'Đang tải video và nhập liệu tự nhiên cho lịch {scheduled_date} {publish_hour}')
 
             title_box = page.locator('ytcp-video-title #textbox').first
             title_box.wait_for(state='visible', timeout=45_000)
             # Wait for YouTube Studio to hydrate initial filename ("final") and upload defaults before overwriting.
-            page.wait_for_timeout(2000)
-            _fill_editable(page, title_box, title[:100])
+            _human_wait(page, 2100, 3200, context)
+            _fill_editable(page, title_box, title[:100], context=context, chunked=False)
+            _human_wait(page, 550, 1150, context)
             desc_box = page.locator('ytcp-video-description #textbox').first
             if desc_box.count():
-                _fill_editable(page, desc_box, description[:5000])
+                _fill_editable(page, desc_box, description[:5000], context=context, chunked=True)
+                _human_wait(page, 550, 1100, context)
             not_kids = page.locator('tp-yt-paper-radio-button[name="VIDEO_MADE_FOR_KIDS_NOT_MFK"]').first
             if not_kids.count():
-                not_kids.click()
-            # Re-verify title did not get reset by late hydration.
-            _fill_editable(page, title_box, title[:100])
+                _human_scroll(
+                    page,
+                    ['ytcp-uploads-dialog #scrollable-content', 'ytcp-uploads-dialog tp-yt-iron-pages'],
+                    context=context,
+                )
+                _human_move_and_click(page, not_kids, timeout=10_000, context=context)
+                _human_wait(page, 450, 950, context)
 
-            _advance_to_visibility(page)
-            _fill_schedule_fields(page, scheduled_date, publish_hour)
+            # Re-verify title only if YouTube Studio's late hydration overwrote it.
+            expected_title = re.sub(r'\s+', ' ', title[:100]).strip()
+            current_title = _read_editable(title_box)
+            if current_title != expected_title and expected_title[:20] not in current_title:
+                _fill_editable(page, title_box, title[:100], context=context, chunked=False)
+                _human_wait(page, 400, 800, context)
+
+            _advance_to_visibility(page, context=context)
+            _fill_schedule_fields(page, scheduled_date, publish_hour, context=context)
 
             # Never auto-click #done-button: let the user inspect and click Schedule themselves.
             if context:
@@ -482,8 +693,8 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
                         break
                     if saw_dialog and (not upload_dialog.count() or not upload_dialog.is_visible()):
                         # Dialog closed: verify in Content list that video is genuinely Scheduled, NOT Draft.
-                        page.wait_for_timeout(1500)
-                        _, _, rows = _read_studio_state(page, include_tabs=True)
+                        _human_wait(page, 1400, 2000, context)
+                        _, _, rows = _read_studio_state(page, include_tabs=True, context=context)
                         want = _strip_tags(title)
                         matched = [r for r in rows if want and want in r['title']]
                         if matched and any(r['scheduled'] for r in matched):
@@ -504,5 +715,5 @@ def upload_and_schedule(mp4_path, title, description, scheduled_date, publish_ho
             if closed:
                 raise Cancelled('Bạn đã đóng YouTube Studio trước khi bấm Lên lịch.')
             raise TimeoutError('Hết thời gian chờ bạn bấm nút Lên lịch trên YouTube Studio.')
-        finally:
-            browser.close()
+    finally:
+        _BROWSER_LOCK.release()

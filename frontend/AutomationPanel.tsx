@@ -27,7 +27,7 @@ export default function AutomationPanel({onOpen}:{onOpen:(id:string)=>void}){
    <div className="field-row">
     <label>Giờ đăng YouTube (1 video/ngày)<input type="time" value={data?.config.youtube_publish_hour||'19:00'} disabled={pending||!data} onChange={e=>act(async()=>{await request('',{youtube_publish_hour:e.target.value},'PUT')})}/></label>
     <label>Tự động xoá dự án &amp; video gốc (ngày, 0 = tắt)<input type="number" min={0} max={365} value={data?.config.auto_delete_days??0} disabled={pending||!data} onChange={e=>act(async()=>{await request('',{auto_delete_days:Math.max(0,Math.min(365,Number(e.target.value)||0))},'PUT')})}/></label>
-    <button className="secondary" disabled={pending} onClick={()=>act(async()=>{const r=await fetch('/api/youtube/login',{method:'POST'});const j=await r.json();setYtNote(j.message||'Đã mở YouTube Studio.')})}><Youtube size={16}/> Đăng nhập YouTube Studio</button>
+    <button className="secondary" disabled={pending} onClick={()=>act(async()=>{const r=await fetch('/api/youtube/login',{method:'POST'});const j=await r.json();if(!r.ok)throw new Error(typeof j.detail==='string'?j.detail:'Không mở được Camoufox YouTube Studio.');setYtNote(j.message||'Đã mở Camoufox YouTube Studio.')})}><Youtube size={16}/> Đăng nhập YouTube Studio</button>
    </div>
    <label className="check-label"><input type="checkbox" checked={!data?.config.remove_background} disabled={pending||!data} onChange={e=>act(async()=>{await request('',{remove_background:!e.target.checked},'PUT')})}/> Không xoá nền video</label>
    <p><b>Đến 90 giây: dọc 9:16 · Trên 90 giây: ngang 16:9</b><br/>Bản nháp sẵn sàng chỉnh sửa · Phụ đề Việt-Anh · {data?.config.remove_background?'Xoá nền bằng GPU':'Giữ nền video gốc'} · Tự cân âm lượng giọng nói</p>

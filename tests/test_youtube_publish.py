@@ -154,6 +154,148 @@ class YouTubeAndAutoDeleteTests(unittest.TestCase):
         self.assertNotIn('youtube', cleared)
         self.assertEqual(youtube.list_uploads(), [])
 
+    def test_camoufox_profile_and_sticky_fingerprint_persistence(self):
+        pdir = youtube.profile_dir()
+        self.assertEqual(pdir.name, 'youtube-camoufox-profile')
+        preset = youtube._load_or_create_fingerprint_preset()
+        self.assertIsInstance(preset, dict)
+        self.assertTrue((pdir / 'camoufox-fingerprint.json').is_file())
+        screen = preset.get('screen') or {}
+        if screen:
+            self.assertGreaterEqual(screen.get('width', 0), 1280)
+            self.assertGreaterEqual(screen.get('height', 0), 720)
+        # Subsequent call reuses the exact persisted preset rather than randomizing.
+        preset2 = youtube._load_or_create_fingerprint_preset()
+        self.assertEqual(preset, preset2)
+
+    def test_camoufox_no_chromium_fallback_and_lock_guard(self):
+        with patch('camoufox.pkgman.camoufox_path', side_effect=FileNotFoundError('missing')):
+            with self.assertRaises(RuntimeError) as ctx:
+                with youtube._launch_persistent(headless=True):
+                    pass
+            self.assertIn('Camoufox', str(ctx.exception))
+            with self.assertRaises(ValueError):
+                youtube.open_login_session()
+
+        # Concurrent session lock rejects overlapping login or upload cleanly.
+        self.assertTrue(youtube._BROWSER_LOCK.acquire(blocking=False))
+        try:
+            with patch.object(youtube, '_ensure_camoufox_ready', return_value='camoufox.exe'):
+                with self.assertRaises(ValueError):
+                    youtube.open_login_session()
+                with self.assertRaises(RuntimeError):
+                    youtube.upload_and_schedule('clip.mp4', 'Title', 'Desc', '2026-12-01')
+        finally:
+            youtube._BROWSER_LOCK.release()
+
+    def test_human_like_typing_clicking_scrolling_and_launch_options(self):
+        captured = {}
+
+        class FakeCtx:
+            pages = []
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        def fake_camoufox(**kwargs):
+            captured.update(kwargs)
+            return FakeCtx()
+
+        with patch.object(youtube, '_ensure_camoufox_ready', return_value='camoufox.exe'), \
+             patch('camoufox.sync_api.Camoufox', side_effect=fake_camoufox):
+            with youtube._launch_persistent(headless=False):
+                pass
+        self.assertTrue(captured['persistent_context'])
+        self.assertEqual(captured['os'], 'windows')
+        self.assertEqual(captured['humanize'], 1.2)
+        self.assertEqual(captured['locale'], ['en-US', 'vi-VN'])
+        self.assertTrue(captured['enable_cache'])
+        self.assertIn('fingerprint_preset', captured)
+
+        # Verify human typing, chunked description, hover-before-click, and mouse wheel scrolling.
+        events = []
+
+        class FakeKeyboard:
+            def press(self, key):
+                events.append(('press', key))
+            def type(self, ch, delay=0):
+                events.append(('type', ch, delay))
+            def insert_text(self, txt):
+                events.append(('insert_text', txt))
+
+        class FakeMouse:
+            def move(self, x, y, steps=1):
+                events.append(('move', steps))
+            def wheel(self, dx, dy):
+                events.append(('wheel', dy))
+
+        class FakeLocator:
+            def __init__(self, text_value='', box=None):
+                self._text = text_value
+                self._box = box or {'x': 100, 'y': 100, 'width': 400, 'height': 300}
+            @property
+            def first(self):
+                return self
+            def count(self):
+                return 1
+            def is_visible(self):
+                return True
+            def wait_for(self, **kw):
+                pass
+            def scroll_into_view_if_needed(self, **kw):
+                events.append(('scroll_into_view',))
+            def hover(self, **kw):
+                events.append(('hover',))
+            def click(self, **kw):
+                events.append(('click', kw.get('delay', 0)))
+            def bounding_box(self):
+                return self._box
+            def inner_text(self):
+                return self._text
+
+        class FakePage:
+            viewport_size = {'width': 1280, 'height': 720}
+            keyboard = FakeKeyboard()
+            mouse = FakeMouse()
+            def wait_for_timeout(self, ms):
+                pass
+            def locator(self, sel):
+                return FakeLocator()
+
+        page = FakePage()
+        youtube._human_move_and_click(page, FakeLocator(), context=None)
+        self.assertIn(('hover',), events)
+        click_delays = [e[1] for e in events if e[0] == 'click']
+        self.assertTrue(click_delays and click_delays[0] >= 45)
+
+        youtube._human_scroll(page, ['#scroll'])
+        self.assertTrue(any(e[0] == 'wheel' and e[1] > 0 for e in events))
+
+        # Short title uses char-by-char keyboard.type; already-matching text skips re-typing.
+        events.clear()
+        loc_title = FakeLocator(text_value='Learn vietnamese: Hello')
+        self.assertTrue(youtube._fill_editable(page, loc_title, 'Learn vietnamese: Hello'))
+        self.assertEqual(events, [])
+
+        loc_empty = FakeLocator(text_value='Learn vietnamese: Hi')
+        youtube._fill_editable(page, loc_empty, 'Learn vietnamese: Hi', chunked=False)
+        # Returns immediately because normalized text matches; test non-matching target:
+        events.clear()
+        loc_old = FakeLocator(text_value='final')
+        # FakeLocator returns 'final' on inner_text, so _fill_editable retries up to 3 times; verify char typing happened.
+        youtube._fill_editable(page, loc_old, 'Xin chào', chunked=False)
+        typed_chars = ''.join(e[1] for e in events if e[0] == 'type')
+        self.assertTrue(typed_chars.startswith('Xin chào'))
+        self.assertTrue(all(e[2] >= 35 for e in events if e[0] == 'type'))
+
+        # Long multi-line description uses insert_text per line + char-by-char hashtags.
+        events.clear()
+        long_desc = 'Topic: Greetings\n\n' + ('- Xin chào — Hello\n' * 10) + '#learnvietnamese'
+        youtube._fill_editable(page, FakeLocator(text_value=''), long_desc, chunked=True)
+        self.assertTrue(any(e[0] == 'insert_text' and 'Topic: Greetings' in e[1] for e in events))
+        self.assertTrue(any(e[0] == 'type' and e[1] == '#' for e in events))
+
 
 if __name__ == '__main__':
     unittest.main()
